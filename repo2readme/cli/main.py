@@ -60,6 +60,12 @@ def main():
     help="Respect .gitignore and .git/info/exclude patterns during repository traversal",
 )
 @click.option(
+    "--max-workers",
+    default=None,
+    type=int,
+    help="Number of parallel worker threads for file processing (default: 4, capped at file count)",
+)
+@click.option(
     "--provider",
     default=None,
     help="LLM provider (groq, google, openai, anthropic, openrouter, ollama, etc.)"
@@ -74,7 +80,7 @@ def main():
     default=None,
     help="Base URL for OpenAI-compatible providers",
 )
-def run(url, local, output, force, include_patterns, exclude_patterns, max_file_size_kb, dry_run, respect_gitignore, provider, model, base_url,):
+def run(url, local, output, force, include_patterns, exclude_patterns, max_file_size_kb, dry_run, respect_gitignore, max_workers, provider, model, base_url,):
     """ Use --url for GitHub repo url and --local for local repo
     """
     if not url and not local:
@@ -108,6 +114,7 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
                 exclude_patterns=exclude_patterns,
                 max_file_size_kb=max_file_size_kb,
                 respect_gitignore=respect_gitignore,
+                max_workers=max_workers,
             )
             if dry_run:
                 files, root_path, loader_obj, skipped = loader.load(return_skip_info=True)
