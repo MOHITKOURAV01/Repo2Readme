@@ -13,8 +13,7 @@ Covers:
 """
 
 import os
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -28,8 +27,6 @@ from repo2readme.loaders.traversal.stages import (
     load_file_content,
     FilteredFile,
     FileMetadata,
-    DocumentResult,
-    PipelineContext,
 )
 
 
@@ -64,7 +61,7 @@ def nested_repo(tmp_path):
 class TestDiscoverFiles:
     def test_discover_basic(self, sample_repo):
         files, ctx = discover_files(sample_repo)
-        assert len(files) == 5
+        assert len(files) == 5  # README.md, main.py, utils.py, guide.md, .gitignore
         basenames = [os.path.basename(f) for f in files]
         assert basenames == sorted(basenames)
 
@@ -192,6 +189,7 @@ class TestTraversalPipeline:
     def test_pipeline_with_exclude(self, sample_repo):
         pipeline = TraversalPipeline(sample_repo, exclude_patterns=["*.md"])
         documents, ctx = pipeline.run()
+        # main.py, utils.py (README.md and guide.md excluded; .gitignore filtered by default)
         assert len(documents) == 2
 
     def test_pipeline_gitignore(self, tmp_path):

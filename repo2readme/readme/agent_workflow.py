@@ -16,6 +16,7 @@ class ReadmeState(TypedDict):
     provider: str | None
     model: str | None
     base_url: str | None
+    dependency_overview: str
 
 def generate_readme_node(state:ReadmeState):
     latest_readme = (
@@ -28,8 +29,10 @@ def generate_readme_node(state:ReadmeState):
        latest_readme=latest_readme,
        provider=state["provider"],
        model_name=state["model"],
-       base_url=state["base_url"]
+       base_url=state["base_url"],
+       dependency_overview=state.get("dependency_overview", "")
     )
+    
     return {
         'readme':[readme]
     }
