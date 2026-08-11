@@ -203,6 +203,7 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
                 provider=provider,
                 model=model,
                 base_url=base_url,
+                max_workers=max_workers,
                 progress=progress,
                 task_id=task
             )

@@ -12,6 +12,7 @@ def generate_all_summaries(
     provider: str | None = None,
     model: str | None = None,
     base_url: str | None = None,
+    max_workers: int | None = None,
     progress=None,
     task_id=None
 ) -> tuple[List[Dict[str, Any]], List[str]]:
@@ -63,9 +64,9 @@ def generate_all_summaries(
             with errors_lock:
                 errors.append(f"Error processing {file_path}: {e}")
                 
-    max_workers = min(2, total_documents)
+    effective_workers = min(max_workers or 4, total_documents)
     
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=effective_workers) as executor:
         futures = {executor.submit(process_document, doc): doc for doc in documents}
         
         for future in as_completed(futures):
