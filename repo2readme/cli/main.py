@@ -14,8 +14,9 @@ from repo2readme.dependency_graph import build_dependency_graph
 # Import new services
 from repo2readme.services.environment import setup_api_keys
 from repo2readme.services.estimation import format_size, estimate_analysis_cost
-from repo2readme.services.summarization import generate_all_summaries
+from repo2readme.services.summarization import generate_all_summaries, generate_hierarchical_summaries
 from repo2readme.services.orchestrator import run_pipeline
+
 
 @click.group()
 def main():
@@ -202,6 +203,16 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
                 progress=progress,
                 task_id=task
             )
+            
+            rollup_task = progress.add_task("[cyan]Generating directory summaries...[/cyan]", total=1)
+            hierarchical_summaries = generate_hierarchical_summaries(
+                file_summaries=summaries,
+                provider=provider,
+                model=model,
+                base_url=base_url,
+                progress=progress,
+                task_id=rollup_task
+            )
 
         # Remove cache entries for files that no longer exist
         current_files = {doc["metadata"]["file_path"] for doc in documents}
@@ -210,7 +221,7 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
         rprint("[cyan]Generating README...[/cyan]")
         
         readme = run_pipeline(
-            summaries=summaries,
+            summaries=hierarchical_summaries,
             tree=tree,
             dependency_overview=dependency_overview,
             provider=provider,

@@ -145,6 +145,9 @@ def test_normal_run_user_confirms(monkeypatch, tmp_path):
         summarize_called = True
         return [{"file_path": "main.py", "description": "fake summary"}], []
 
+    def fake_generate_hierarchical_summaries(file_summaries, provider, model, base_url, progress, task_id):
+        return file_summaries
+
     def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
         nonlocal workflow_called
         workflow_called = True
@@ -152,6 +155,7 @@ def test_normal_run_user_confirms(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli_main, "setup_api_keys", fake_setup_api_keys)
     monkeypatch.setattr(cli_main, "generate_all_summaries", fake_generate_all_summaries)
+    monkeypatch.setattr(cli_main, "generate_hierarchical_summaries", fake_generate_hierarchical_summaries)
     monkeypatch.setattr(cli_main, "run_pipeline", fake_run_pipeline)
 
     runner = CliRunner()
@@ -191,6 +195,9 @@ def test_normal_run_force_bypasses_confirmation(monkeypatch, tmp_path):
         summarize_called = True
         return [{"file_path": "main.py", "description": "fake summary"}], []
 
+    def fake_generate_hierarchical_summaries(file_summaries, provider, model, base_url, progress, task_id):
+        return file_summaries
+
     def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
         nonlocal workflow_called
         workflow_called = True
@@ -198,6 +205,7 @@ def test_normal_run_force_bypasses_confirmation(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli_main, "setup_api_keys", fake_setup_api_keys)
     monkeypatch.setattr(cli_main, "generate_all_summaries", fake_generate_all_summaries)
+    monkeypatch.setattr(cli_main, "generate_hierarchical_summaries", fake_generate_hierarchical_summaries)
     monkeypatch.setattr(cli_main, "run_pipeline", fake_run_pipeline)
 
     runner = CliRunner()

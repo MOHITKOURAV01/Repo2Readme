@@ -73,3 +73,97 @@ def generate_all_summaries(
                 progress.update(task_id, advance=1)
                 
     return summaries, errors
+
+def build_directory_tree(file_summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Builds a tree structure of the repository based on file paths.
+    """
+    tree = {"type": "dir", "path": ".", "files": [], "children": {}}
+    for summary in file_summaries:
+        if isinstance(summary, str):
+            continue
+        path = summary.get("file_path", "")
+        if not path:
+            continue
+        parts = path.split("/")
+        current = tree
+        for i, part in enumerate(parts):
+            if i == len(parts) - 1:
+                current["files"].append(summary)
+            else:
+                if part not in current["children"]:
+                    current["children"][part] = {
+                        "type": "dir",
+                        "path": "/".join(parts[:i+1]),
+                        "files": [],
+                        "children": {}
+                    }
+                current = current["children"][part]
+    return tree
+
+def generate_hierarchical_summaries(
+    file_summaries: List[Dict[str, Any]],
+    provider: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+    progress=None,
+    task_id=None
+) -> List[Dict[str, Any]]:
+    """
+    Rolls up file summaries into directory summaries recursively.
+    """
+    if len(file_summaries) <= 15:
+        if progress and task_id is not None:
+            progress.update(task_id, advance=1)
+        return file_summaries
+        
+    tree = build_directory_tree(file_summaries)
+    
+    from repo2readme.summarize.directory_summary import summarize_directory
+    
+    def count_dirs(node):
+        return 1 + sum(count_dirs(c) for c in node["children"].values())
+        
+    total_dirs = count_dirs(tree) - 1 # excluding root
+    if progress and task_id is not None:
+        progress.update(task_id, total=total_dirs, completed=0)
+    
+    def process_dir(node: Dict[str, Any]) -> Any:
+        child_summaries = []
+        for child_name, child_node in node["children"].items():
+            child_summary = process_dir(child_node)
+            if child_summary:
+                if isinstance(child_summary, list):
+                    child_summaries.extend(child_summary)
+                else:
+                    child_summaries.append(child_summary)
+                
+        contents = child_summaries + node["files"]
+        if not contents:
+            return None
+            
+        if node["path"] == ".":
+            return contents
+
+        if len(contents) == 1:
+            if progress and task_id is not None:
+                progress.update(task_id, advance=1)
+            return contents[0]
+            
+        dir_summary = summarize_directory(
+            dir_path=node["path"],
+            contents_summaries=contents,
+            provider=provider,
+            model_name=model,
+            base_url=base_url
+        )
+        
+        if progress and task_id is not None:
+            progress.update(task_id, advance=1)
+            
+        return dir_summary
+        
+    top_level_summaries = process_dir(tree)
+    if isinstance(top_level_summaries, list):
+        return top_level_summaries
+    return [top_level_summaries]

@@ -20,11 +20,15 @@ def test_output_file_is_not_overwritten_when_user_declines(monkeypatch, tmp_path
         def load(self):
             return [], str(tmp_path), None
 
+    def fake_generate_hierarchical_summaries(file_summaries, provider, model, base_url, progress, task_id):
+        return file_summaries
+
     def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
         return "new generated content"
 
     monkeypatch.setattr(cli_main, "setup_api_keys", fake_setup_api_keys)
     monkeypatch.setattr("repo2readme.loaders.repo_loader.RepoLoader", FakeRepoLoader)
+    monkeypatch.setattr(cli_main, "generate_hierarchical_summaries", fake_generate_hierarchical_summaries)
     monkeypatch.setattr(cli_main, "run_pipeline", fake_run_pipeline)
 
     runner = CliRunner()
@@ -53,11 +57,15 @@ def test_output_file_is_overwritten_when_user_confirms(monkeypatch, tmp_path):
         def load(self):
             return [], str(tmp_path), None
 
+    def fake_generate_hierarchical_summaries(file_summaries, provider, model, base_url, progress, task_id):
+        return file_summaries
+
     def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
         return "new generated content"
 
     monkeypatch.setattr(cli_main, "setup_api_keys", fake_setup_api_keys)
     monkeypatch.setattr("repo2readme.loaders.repo_loader.RepoLoader", FakeRepoLoader)
+    monkeypatch.setattr(cli_main, "generate_hierarchical_summaries", fake_generate_hierarchical_summaries)
     monkeypatch.setattr(cli_main, "run_pipeline", fake_run_pipeline)
 
     runner = CliRunner()
@@ -86,11 +94,15 @@ def test_output_file_is_overwritten_with_force(monkeypatch, tmp_path):
         def load(self):
             return [], str(tmp_path), None
 
+    def fake_generate_hierarchical_summaries(file_summaries, provider, model, base_url, progress, task_id):
+        return file_summaries
+
     def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
         return "new generated content"
 
     monkeypatch.setattr(cli_main, "setup_api_keys", fake_setup_api_keys)
     monkeypatch.setattr("repo2readme.loaders.repo_loader.RepoLoader", FakeRepoLoader)
+    monkeypatch.setattr(cli_main, "generate_hierarchical_summaries", fake_generate_hierarchical_summaries)
     monkeypatch.setattr(cli_main, "run_pipeline", fake_run_pipeline)
 
     runner = CliRunner()
