@@ -25,7 +25,7 @@ def generate_readme(
     prompt = PromptTemplate(
         template="""
 You are an expert README Generator and a Markdown file Specialist.
-Your task is to generate a cleaned, well-structured, professinal README.md.
+Your task is to generate a cleaned, well-structured, professional README.md.
 
 Rules:
 - Do NOT hallucinate.

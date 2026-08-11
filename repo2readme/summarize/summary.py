@@ -40,10 +40,10 @@ Your summary MUST include:
 - If the line of code is less the summary will be short
 and the if the line of code is high the summary will be large.
 - The summary size will depend on the total line of codes
-- Add key functions, classes,what is the perpose of them
+- Add key functions, classes, and their purpose
 - Important logic and algorithms
-- All the dependencies and intregrations with other files
-- Any configuration, environment varilables, or API usage
+- All the dependencies and integrations with other files
+- Any configuration, environment variables, or API usage
 - Also add the information if the code has any important portions
 ---
 
