@@ -216,7 +216,10 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
 
         # Remove cache entries for files that no longer exist
         current_files = {doc["metadata"]["file_path"] for doc in documents}
-        summary_cache.remove_entries(list(current_files))
+        stale_entries = summary_cache.get_deleted_files(current_files)
+        if stale_entries:
+            stale_paths = [e["file_path"] for e in stale_entries]
+            summary_cache.remove_entries(stale_paths)
 
         rprint("[cyan]Generating README...[/cyan]")
         
