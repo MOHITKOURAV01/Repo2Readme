@@ -76,6 +76,9 @@ def get_api_key(provider: str):
     else:
         api_key = input(f"Enter your {provider} API key: ").strip()
 
+    if not api_key or len(api_key) < 8:
+        raise ValueError(f"Invalid {provider} API key. Key must be at least 8 characters.")
+
     env[env_var] = api_key
     save_env(env)
 
