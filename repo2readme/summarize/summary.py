@@ -1,12 +1,12 @@
 from langchain_core.prompts import PromptTemplate
-from dotenv import load_dotenv
+
 import hashlib
 import logging
 import os
 from langchain_core.output_parsers import JsonOutputParser
 from repo2readme.llm.factory import create_llm
 
-load_dotenv()
+
 
 logger = logging.getLogger(__name__)
 

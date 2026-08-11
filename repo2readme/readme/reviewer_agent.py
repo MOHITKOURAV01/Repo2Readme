@@ -2,10 +2,9 @@ from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel,Field
 from langchain_core.prompts import PromptTemplate
 import os
-from dotenv import load_dotenv
 from repo2readme.llm.factory import create_llm
 
-load_dotenv()
+
 class ReviewSchema(BaseModel):
     score:float=Field(description="A score between 1 and 10 based on the quality of the README")
     feedback:str=Field(description="Actionable comment how to improve the README")

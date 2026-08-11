@@ -1,5 +1,3 @@
-from dotenv import load_dotenv
-load_dotenv()
 from langchain_core.prompts import PromptTemplate  # noqa: E402
 from langchain_core.output_parsers import StrOutputParser  # noqa: E402
 from typing import List  # noqa: E402

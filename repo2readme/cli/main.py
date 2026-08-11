@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import click
 from rich import print as rprint
 from rich.progress import Progress
