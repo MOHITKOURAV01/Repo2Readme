@@ -1,4 +1,4 @@
-from repo2readme.readme.agent_workflow import workflow
+from repo2readme.readme.agent_workflow import build_workflow
 
 def run_pipeline(
     summaries: list,
@@ -11,6 +11,8 @@ def run_pipeline(
     """
     Invokes the LangGraph workflow to generate the README and returns the result.
     """
+    workflow = build_workflow()
+
     initial_state = {
         "summaries": summaries,
         "tree_structure": tree,
