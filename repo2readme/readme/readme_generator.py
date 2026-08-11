@@ -1,5 +1,3 @@
-from dotenv import load_dotenv
-load_dotenv()
 from langchain_core.prompts import PromptTemplate  # noqa: E402
 from langchain_core.output_parsers import StrOutputParser  # noqa: E402
 from typing import List  # noqa: E402
@@ -25,7 +23,7 @@ def generate_readme(
     prompt = PromptTemplate(
         template="""
 You are an expert README Generator and a Markdown file Specialist.
-Your task is to generate a cleaned, well-structured, professinal README.md.
+Your task is to generate a cleaned, well-structured, professional README.md.
 
 Rules:
 - Do NOT hallucinate.

@@ -1,11 +1,14 @@
 from langchain_core.prompts import PromptTemplate
-from dotenv import load_dotenv
+
 import hashlib
+import logging
 import os
 from langchain_core.output_parsers import JsonOutputParser
 from repo2readme.llm.factory import create_llm
 
-load_dotenv()
+
+
+logger = logging.getLogger(__name__)
 
 
 PROMPT_TEMPLATE = """
@@ -37,10 +40,10 @@ Your summary MUST include:
 - If the line of code is less the summary will be short
 and the if the line of code is high the summary will be large.
 - The summary size will depend on the total line of codes
-- Add key functions, classes,what is the perpose of them
+- Add key functions, classes, and their purpose
 - Important logic and algorithms
-- All the dependencies and intregrations with other files
-- Any configuration, environment varilables, or API usage
+- All the dependencies and integrations with other files
+- Any configuration, environment variables, or API usage
 - Also add the information if the code has any important portions
 ---
 
@@ -105,6 +108,5 @@ def summarize_file(
             "content": content
         })
     except Exception as e:
-        print(file_path)
-        print("SUMMARY ERROR:", e)
+        logger.warning("Summary error for %s: %s", file_path, e)
         return {"file_path": file_path, "error": str(e)}

@@ -21,7 +21,6 @@ dependencies = [
     "rich>=14.2.0",
     "GitPython>=3.1.45",
     "python-dotenv>=1.2.1",
-    "pytest>=9.1.1",
     "pathspec>=0.12.1",
     
     "langchain>=1.2.0",
@@ -37,6 +36,11 @@ dependencies = [
 
 [project.urls]
 Repository = "https://github.com/agsaru/repo2readme"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1.1",
+]
 
 [project.scripts]
 repo2readme = "repo2readme.cli.main:main"
