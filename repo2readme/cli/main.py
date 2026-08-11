@@ -1,18 +1,21 @@
 import click
 from rich import print as rprint
 from rich.progress import Progress
-from repo2readme.config import (
-    get_api_keys,
-    get_api_key,
-    reset_api_keys,
-)
+from repo2readme.config import reset_api_keys
 import os
-from repo2readme.utils.tree import generate_tree
-from repo2readme.utils.detect_language import detect_lang
-from repo2readme.cache import SummaryCache
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
+from collections import Counter
 
+from repo2readme.utils.tree import generate_tree
+from repo2readme.cache import SummaryCache
+from repo2readme.loaders.repo_loader import RepoLoader
+from repo2readme.summarize.summary import get_prompt_template_hash
+from repo2readme.dependency_graph import build_dependency_graph
+
+# Import new services
+from repo2readme.services.environment import setup_api_keys
+from repo2readme.services.estimation import format_size, estimate_analysis_cost
+from repo2readme.services.summarization import generate_all_summaries
+from repo2readme.services.orchestrator import run_pipeline
 
 @click.group()
 def main():
@@ -88,9 +91,6 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
         return
 
     source = url if url else local
-    
-    from repo2readme.loaders.repo_loader import RepoLoader
-    from repo2readme.summarize.summary import get_prompt_template_hash
 
     # Initialize file summary cache
     cache_dir = os.path.join(os.getcwd(), ".repo2readme", "cache")
@@ -134,24 +134,12 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
         })
     
     # Build dependency graph for README enrichment
-    from repo2readme.dependency_graph import build_dependency_graph
     dependency_graph = build_dependency_graph(documents)
     dependency_overview = dependency_graph.to_markdown_summary()
 
     tree = generate_tree(root_path)
 
-    # Estimate token count (roughly 3 characters per token)
-    estimated_tokens = sum(max(1, len(doc["content"]) // 3) for doc in documents)
-    total_size_bytes = sum(len(doc["content"].encode("utf-8")) for doc in documents)
-    total_documents = len(documents)
-
-    def format_size(size_bytes):
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes / 1024:.1f} KB"
-        else:
-            return f"{size_bytes / (1024 * 1024):.1f} MB"
+    estimated_tokens, total_size_bytes, total_documents = estimate_analysis_cost(documents)
 
     if dry_run:
         rprint("\n[bold]Repository Tree[/bold]\n")
@@ -161,7 +149,6 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
             rel_path = doc["metadata"].get("relative_path", "")
             rprint(f"✓ [green]{rel_path}[/green]")
         if skipped:
-            from collections import Counter
             skip_reasons = Counter()
             for _, reason in skipped:
                 skip_reasons[reason] += 1
@@ -199,87 +186,22 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
                 return
 
         try:
-            if provider:
-                api_key = get_api_key(provider)
-
-                provider_env = {
-                    "groq": "GROQ_API_KEY",
-                    "google": "GOOGLE_API_KEY",
-                    "gemini": "GOOGLE_API_KEY",
-                    "openai": "OPENAI_API_KEY",
-                    "anthropic": "ANTHROPIC_API_KEY",
-                    "openrouter": "OPENROUTER_API_KEY",
-                    "together": "TOGETHER_API_KEY",
-                }
-
-                os.environ[provider_env[provider.lower()]] = api_key
-
-            else:
-                groq_key, gemini_key = get_api_keys()
-                os.environ["GROQ_API_KEY"] = groq_key
-                os.environ["GOOGLE_API_KEY"] = gemini_key
-
+            setup_api_keys(provider)
         except Exception as e:
             rprint(f"[red]Failed to configure API keys: {e}[/red]")
             return
 
-        from repo2readme.summarize.summary import summarize_file
-        from repo2readme.readme.agent_workflow import workflow
-
-        summaries = []
-        errors = []
-        
-        # Skip summarization if there are no documents
-        if total_documents > 0:
-            summaries_lock = threading.Lock()
-            errors_lock = threading.Lock()
-            
-            def process_document(doc):
-                meta = doc["metadata"]
-                file_path = meta["file_path"]
-                try:
-                    lang = detect_lang(meta.get("file_type", "text"), doc["content"])
-                    cached = summary_cache.get(file_path, doc["content"], lang)
-                    if cached is not None:
-                        with summaries_lock:
-                            summaries.append(cached)
-                        return
-
-                    if provider or model or base_url:
-                        summary = summarize_file(
-                            file_path=file_path,
-                            language=lang,
-                            content=doc["content"],
-                            provider=provider,
-                            model_name=model,
-                            base_url=base_url,
-                        )
-                    else:
-                        summary = summarize_file(
-                            file_path=file_path,
-                            language=lang,
-                            content=doc["content"],
-                        )
-                    with summaries_lock:
-                        summaries.append(summary)
-                    # Only cache successful summaries; failed ones will be retried
-                    if not isinstance(summary, dict) or "error" not in summary:
-                        summary_cache.put(file_path, doc["content"], lang, summary, meta.get("mtime", 0))
-                except Exception as e:
-                    with errors_lock:
-                        errors.append(f"Error processing {file_path}: {e}")
-            
-            with Progress() as progress:
-                task = progress.add_task("[cyan]Generating summaries...[/cyan]", total=total_documents)
-                
-                # Limit concurrent workers to avoid overwhelming API providers
-                max_workers = min(2, total_documents)
-                
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = {executor.submit(process_document, doc): doc for doc in documents}
-                    
-                    for future in as_completed(futures):
-                        progress.update(task, advance=1)
+        with Progress() as progress:
+            task = progress.add_task("[cyan]Generating summaries...[/cyan]", total=total_documents)
+            summaries, errors = generate_all_summaries(
+                documents=documents,
+                summary_cache=summary_cache,
+                provider=provider,
+                model=model,
+                base_url=base_url,
+                progress=progress,
+                task_id=task
+            )
 
         # Remove cache entries for files that no longer exist
         current_files = {doc["metadata"]["file_path"] for doc in documents}
@@ -287,22 +209,14 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
 
         rprint("[cyan]Generating README...[/cyan]")
         
-        initial_state = {
-            "summaries": summaries,
-            "tree_structure": tree,
-            "iteration_no": 0,
-            "max_iterations": 3,
-            "latest_readme": "",
-            'best_score': 0.0,
-            "best_readme": "",
-            "provider": provider,
-            "model": model,
-            "base_url": base_url,
-            "dependency_overview": dependency_overview,
-        }
-
-        final_state = workflow.invoke(initial_state)
-        readme = final_state['best_readme']
+        readme = run_pipeline(
+            summaries=summaries,
+            tree=tree,
+            dependency_overview=dependency_overview,
+            provider=provider,
+            model=model,
+            base_url=base_url
+        )
 
         if output is None:
             rprint("\n[green]Generated README:[/green]\n")

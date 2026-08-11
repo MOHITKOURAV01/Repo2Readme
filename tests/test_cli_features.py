@@ -16,10 +16,10 @@ def test_dry_run_mode(monkeypatch, tmp_path):
 
     # In dry-run, we should NOT ask for API keys or run summarize/workflow.
     # We will patch them just in case they are called (to make the test fail if they are called).
-    def error_get_api_keys():
+    def error_setup_api_keys(provider):
         raise Exception("API keys should not be requested in dry-run mode")
 
-    monkeypatch.setattr(cli_main, "get_api_keys", error_get_api_keys)
+    monkeypatch.setattr(cli_main, "setup_api_keys", error_setup_api_keys)
 
     runner = CliRunner()
     result = runner.invoke(
@@ -109,10 +109,10 @@ def test_normal_run_user_declines(monkeypatch, tmp_path):
     file1 = tmp_path / "main.py"
     file1.write_text("print('hello')", encoding="utf-8")
 
-    def error_get_api_keys():
+    def error_setup_api_keys(provider):
         raise Exception("API keys should not be requested if user declines")
 
-    monkeypatch.setattr(cli_main, "get_api_keys", error_get_api_keys)
+    monkeypatch.setattr(cli_main, "setup_api_keys", error_setup_api_keys)
 
     runner = CliRunner()
     result = runner.invoke(
@@ -136,25 +136,23 @@ def test_normal_run_user_confirms(monkeypatch, tmp_path):
     summarize_called = False
     workflow_called = False
 
-    def fake_get_api_keys():
+    def fake_setup_api_keys(provider):
         nonlocal api_keys_called
         api_keys_called = True
-        return "fake_groq", "fake_gemini"
 
-    def fake_summarize_file(file_path, language, content):
+    def fake_generate_all_summaries(documents, summary_cache, provider, model, base_url, progress, task_id):
         nonlocal summarize_called
         summarize_called = True
-        return {"file_path": file_path, "description": "fake summary"}
+        return [{"file_path": "main.py", "description": "fake summary"}], []
 
-    class FakeWorkflow:
-        def invoke(self, state):
-            nonlocal workflow_called
-            workflow_called = True
-            return {"best_readme": "fake readme contents"}
+    def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
+        nonlocal workflow_called
+        workflow_called = True
+        return "fake readme contents"
 
-    monkeypatch.setattr(cli_main, "get_api_keys", fake_get_api_keys)
-    monkeypatch.setattr("repo2readme.summarize.summary.summarize_file", fake_summarize_file)
-    monkeypatch.setattr("repo2readme.readme.agent_workflow.workflow", FakeWorkflow())
+    monkeypatch.setattr(cli_main, "setup_api_keys", fake_setup_api_keys)
+    monkeypatch.setattr(cli_main, "generate_all_summaries", fake_generate_all_summaries)
+    monkeypatch.setattr(cli_main, "run_pipeline", fake_run_pipeline)
 
     runner = CliRunner()
     result = runner.invoke(
@@ -184,25 +182,23 @@ def test_normal_run_force_bypasses_confirmation(monkeypatch, tmp_path):
     summarize_called = False
     workflow_called = False
 
-    def fake_get_api_keys():
+    def fake_setup_api_keys(provider):
         nonlocal api_keys_called
         api_keys_called = True
-        return "fake_groq", "fake_gemini"
 
-    def fake_summarize_file(file_path, language, content):
+    def fake_generate_all_summaries(documents, summary_cache, provider, model, base_url, progress, task_id):
         nonlocal summarize_called
         summarize_called = True
-        return {"file_path": file_path, "description": "fake summary"}
+        return [{"file_path": "main.py", "description": "fake summary"}], []
 
-    class FakeWorkflow:
-        def invoke(self, state):
-            nonlocal workflow_called
-            workflow_called = True
-            return {"best_readme": "fake readme contents"}
+    def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
+        nonlocal workflow_called
+        workflow_called = True
+        return "fake readme contents"
 
-    monkeypatch.setattr(cli_main, "get_api_keys", fake_get_api_keys)
-    monkeypatch.setattr("repo2readme.summarize.summary.summarize_file", fake_summarize_file)
-    monkeypatch.setattr("repo2readme.readme.agent_workflow.workflow", FakeWorkflow())
+    monkeypatch.setattr(cli_main, "setup_api_keys", fake_setup_api_keys)
+    monkeypatch.setattr(cli_main, "generate_all_summaries", fake_generate_all_summaries)
+    monkeypatch.setattr(cli_main, "run_pipeline", fake_run_pipeline)
 
     runner = CliRunner()
     result = runner.invoke(
