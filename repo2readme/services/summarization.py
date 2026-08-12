@@ -5,6 +5,7 @@ from typing import List, Dict, Any
 from repo2readme.utils.detect_language import detect_lang
 from repo2readme.summarize.summary import summarize_file
 from repo2readme.cache import SummaryCache
+from repo2readme.services.reporting import SummaryFailure
 
 def generate_all_summaries(
     documents: List[Dict[str, Any]],
@@ -15,14 +16,19 @@ def generate_all_summaries(
     max_workers: int | None = None,
     progress=None,
     task_id=None
-) -> tuple[List[Dict[str, Any]], List[str]]:
+) -> tuple[List[Dict[str, Any]], List[SummaryFailure]]:
     """
     Concurrently generates summaries for all documents.
+
+    Returns the summaries together with the files that raised before a summary
+    could be produced. Summaries that came back as ``{"error": ...}``
+    placeholders stay in the first list; use
+    ``repo2readme.services.reporting.partition_summaries`` to split them out.
     """
     total_documents = len(documents)
     summaries = []
-    errors = []
-    
+    errors: List[SummaryFailure] = []
+
     if total_documents == 0:
         return summaries, errors
 
@@ -62,8 +68,9 @@ def generate_all_summaries(
                 summary_cache.put(file_path, doc["content"], lang, summary, meta.get("mtime", 0))
         except Exception as e:
             with errors_lock:
-                errors.append(f"Error processing {file_path}: {e}")
-                
+                errors.append(SummaryFailure(file_path=file_path, reason=str(e)))
+
+
     effective_workers = min(max_workers or 4, total_documents)
     
     with ThreadPoolExecutor(max_workers=effective_workers) as executor:
