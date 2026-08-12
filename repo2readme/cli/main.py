@@ -87,7 +87,14 @@ def main():
     default=None,
     help="Base URL for OpenAI-compatible providers",
 )
-def run(url, local, output, force, include_patterns, exclude_patterns, max_file_size_kb, dry_run, respect_gitignore, max_workers, provider, model, base_url,):
+@click.option(
+    "--branch",
+    "-b",
+    default="main",
+    show_default=True,
+    help="Branch to clone when using --url.",
+)
+def run(url, local, output, force, include_patterns, exclude_patterns, max_file_size_kb, dry_run, respect_gitignore, max_workers, provider, model, base_url, branch):
     """ Use --url for GitHub repo url and --local for local repo
     """
     if not url and not local:
@@ -119,6 +126,7 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
                 max_file_size_kb=max_file_size_kb,
                 respect_gitignore=respect_gitignore,
                 max_workers=max_workers,
+                branch=branch,
             )
             if dry_run:
                 files, root_path, loader_obj, skipped = loader.load(return_skip_info=True)
@@ -203,6 +211,7 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
                 provider=provider,
                 model=model,
                 base_url=base_url,
+                max_workers=max_workers,
                 progress=progress,
                 task_id=task
             )

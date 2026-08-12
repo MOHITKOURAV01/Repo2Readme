@@ -140,7 +140,7 @@ def test_normal_run_user_confirms(monkeypatch, tmp_path):
         nonlocal api_keys_called
         api_keys_called = True
 
-    def fake_generate_all_summaries(documents, summary_cache, provider, model, base_url, progress, task_id):
+    def fake_generate_all_summaries(documents, summary_cache, provider, model, base_url, progress, task_id, **kwargs):
         nonlocal summarize_called
         summarize_called = True
         return [{"file_path": "main.py", "description": "fake summary"}], []
@@ -190,7 +190,7 @@ def test_normal_run_force_bypasses_confirmation(monkeypatch, tmp_path):
         nonlocal api_keys_called
         api_keys_called = True
 
-    def fake_generate_all_summaries(documents, summary_cache, provider, model, base_url, progress, task_id):
+    def fake_generate_all_summaries(documents, summary_cache, provider, model, base_url, progress, task_id, **kwargs):
         nonlocal summarize_called
         summarize_called = True
         return [{"file_path": "main.py", "description": "fake summary"}], []
