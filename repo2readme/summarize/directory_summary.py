@@ -33,7 +33,7 @@ Return ONLY JSON.
 def summarize_directory(dir_path, contents_summaries, provider=None, model_name=None, base_url=None):
     model = create_llm(
         provider=provider or "groq",
-        model=model_name or "openai/gpt-oss-120b",
+        model=model_name,
         base_url=base_url,
     )
     parser = JsonOutputParser()

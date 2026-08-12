@@ -3,7 +3,9 @@ load_dotenv()
 
 import click
 from rich import print as rprint
+from rich.console import Console
 from rich.progress import Progress
+from rich.table import Table
 from repo2readme.config import reset_api_keys
 import os
 from collections import Counter
@@ -13,6 +15,7 @@ from repo2readme.cache import SummaryCache
 from repo2readme.loaders.repo_loader import RepoLoader
 from repo2readme.summarize.summary import get_prompt_template_hash
 from repo2readme.dependency_graph import build_dependency_graph
+from repo2readme.providers import PROVIDERS, provider_choices_help
 
 # Import new services
 from repo2readme.services.environment import setup_api_keys
@@ -75,7 +78,7 @@ def main():
 @click.option(
     "--provider",
     default=None,
-    help="LLM provider (groq, google, openai, anthropic, openrouter, ollama, etc.)"
+    help=f"LLM provider ({provider_choices_help()}). Run 'repo2readme providers' for details.",
 )
 @click.option(
     "--model",
@@ -266,6 +269,31 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
     finally:
         if hasattr(loader_obj, "cleanup"):
             loader_obj.cleanup()
+
+
+@main.command()
+def providers():
+    """List the supported LLM providers and their defaults."""
+    table = Table(title="Supported providers", header_style="bold cyan")
+    table.add_column("Provider")
+    table.add_column("Aliases")
+    table.add_column("Default model")
+    table.add_column("API key env var")
+
+    for spec in PROVIDERS:
+        table.add_row(
+            spec.name,
+            ", ".join(spec.aliases) or "-",
+            spec.default_model,
+            spec.env_var or "not required",
+        )
+
+    console = Console()
+    console.print(table)
+    rprint(
+        "\nUse with: [cyan]repo2readme run --local . --provider <name> "
+        "[--model <model>][/cyan]"
+    )
 
 
 @main.command()

@@ -1,11 +1,47 @@
 # Configuration
 
-`repo2readme` uses two LLM providers under the hood, so it needs API keys for both:
+By default `repo2readme` uses two LLM providers, so it needs API keys for both:
 
 | Variable | Used for |
 |---|---|
 | `GROQ_API_KEY` | File summarization (Groq's `openai/gpt-oss-120b`) |
 | `GOOGLE_API_KEY` | README generation & review (Gemini `2.5-flash`) |
+
+If you pass `--provider`, only that provider's key is needed.
+
+## Supported providers
+
+Run `repo2readme providers` to print this table from your installed version:
+
+| Provider | Aliases | Default model | API key env var |
+|---|---|---|---|
+| `groq` | | `openai/gpt-oss-120b` | `GROQ_API_KEY` |
+| `google` | `gemini` | `gemini-2.5-flash` | `GOOGLE_API_KEY` |
+| `openai` | | `gpt-4o-mini` | `OPENAI_API_KEY` |
+| `anthropic` | `claude` | `claude-sonnet-4-5` | `ANTHROPIC_API_KEY` |
+| `openrouter` | | `openai/gpt-4o-mini` | `OPENROUTER_API_KEY` |
+| `together` | | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | `TOGETHER_API_KEY` |
+| `ollama` | | `llama3` | not required (local) |
+
+`--model` overrides the default model and `--base-url` overrides the default
+endpoint. `openrouter` and `together` are reached through the OpenAI-compatible
+API, so their base URLs are applied for you:
+
+```bash
+repo2readme run --local . --provider together
+repo2readme run --local . --provider anthropic --model claude-sonnet-4-5
+```
+
+`ollama` talks to a local server (`http://localhost:11434` by default) and never
+prompts for a key. It needs the optional `langchain-ollama` package:
+
+```bash
+pip install langchain-ollama
+repo2readme run --local . --provider ollama --model llama3
+```
+
+A provider that is not in the table now fails immediately with the list of
+supported names, instead of failing later during summarization.
 
 ## Option 1: Let the CLI prompt you
 

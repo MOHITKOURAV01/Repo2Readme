@@ -1,23 +1,30 @@
 import os
+
 from repo2readme.config import get_api_keys, get_api_key
+from repo2readme.providers import get_provider
+
 
 def setup_api_keys(provider: str | None) -> None:
-    """Configures the API keys and sets the required environment variables."""
-    if provider:
-        api_key = get_api_key(provider)
+    """Configure API keys and export them as environment variables.
 
-        provider_env = {
-            "groq": "GROQ_API_KEY",
-            "google": "GOOGLE_API_KEY",
-            "gemini": "GOOGLE_API_KEY",
-            "openai": "OPENAI_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "openrouter": "OPENROUTER_API_KEY",
-            "together": "TOGETHER_API_KEY",
-        }
-
-        os.environ[provider_env[provider.lower()]] = api_key
-    else:
+    When ``provider`` is given, only that provider's key is resolved. Providers
+    that do not authenticate (a local Ollama server, for example) are accepted
+    and simply skip the export. Without an explicit provider the historic
+    Groq + Google defaults are used, since those are the models the summarizer
+    and the reviewer fall back to.
+    """
+    if not provider:
         groq_key, gemini_key = get_api_keys()
         os.environ["GROQ_API_KEY"] = groq_key
         os.environ["GOOGLE_API_KEY"] = gemini_key
+        return
+
+    # Raises UnknownProviderError, which lists the supported providers.
+    spec = get_provider(provider)
+
+    if not spec.requires_api_key:
+        return
+
+    api_key = get_api_key(spec.name)
+    if api_key:
+        os.environ[spec.env_var] = api_key

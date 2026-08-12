@@ -16,10 +16,10 @@ def readme_reviewer(
     base_url: str | None = None,
 ):
     model = create_llm(
-    provider=provider or "google",
-    model=model_name or "gemini-2.5-flash",
-    base_url=base_url,
-)
+        provider=provider or "google",
+        model=model_name,
+        base_url=base_url,
+    )
     parser=PydanticOutputParser(pydantic_object=ReviewSchema)
     review_prompt=PromptTemplate(
         template="""
