@@ -8,11 +8,13 @@ from repo2readme.config import reset_api_keys
 import os
 from collections import Counter
 
+from repo2readme import __version__
 from repo2readme.utils.tree import generate_tree
 from repo2readme.cache import SummaryCache
 from repo2readme.loaders.repo_loader import RepoLoader
 from repo2readme.summarize.summary import get_prompt_template_hash
 from repo2readme.dependency_graph import build_dependency_graph
+from repo2readme.utils.logging_config import logging_options
 
 # Import new services
 from repo2readme.services.environment import setup_api_keys
@@ -22,6 +24,7 @@ from repo2readme.services.orchestrator import run_pipeline
 
 
 @click.group()
+@click.version_option(version=__version__, prog_name="repo2readme")
 def main():
     """
     Use the `run` command to generate a README.
@@ -32,6 +35,7 @@ def main():
 
 
 @main.command()
+@logging_options
 @click.option("--url", "-u", help="GitHub repo URL")
 @click.option("--local", "-l", help="Local repo path")
 @click.option("--output", "-o", default=None, type=click.Path(), help="Save README to file")

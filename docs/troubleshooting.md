@@ -45,3 +45,16 @@ Confirm the repository is public (or that you have access), and that the URL is 
 ## Still stuck?
 
 Open an issue: https://github.com/agsaru/Repo2Readme/issues
+
+## Getting more detail out of a failing run
+
+Run with `-v` (info) or `-vv` (debug), or capture a full debug log to a file:
+
+```bash
+repo2readme run --local ./my-project -vv
+repo2readme run --local ./my-project --log-file repo2readme.log
+```
+
+The log file always records `DEBUG` regardless of console verbosity, so it is
+the right thing to attach to a bug report along with `repo2readme --version`.
+See [Logging and verbosity](./logging.md).
