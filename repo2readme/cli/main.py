@@ -9,12 +9,12 @@ import os
 from collections import Counter
 
 from repo2readme import __version__
+from repo2readme.utils.logging_config import logging_options
 from repo2readme.utils.tree import generate_tree
 from repo2readme.cache import SummaryCache
 from repo2readme.loaders.repo_loader import RepoLoader
 from repo2readme.summarize.summary import get_prompt_template_hash
 from repo2readme.dependency_graph import build_dependency_graph
-from repo2readme.utils.logging_config import logging_options
 
 # Import new services
 from repo2readme.services.environment import setup_api_keys
