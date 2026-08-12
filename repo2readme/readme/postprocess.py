@@ -10,8 +10,8 @@ rest instead of silently rewriting the model's content.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Iterator
 
 # A fence that opens the document and closes it at the very end, e.g. the model
 # answering with ```markdown ... ```.
