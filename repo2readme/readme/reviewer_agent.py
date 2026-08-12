@@ -3,6 +3,7 @@ from pydantic import BaseModel,Field
 from langchain_core.prompts import PromptTemplate
 import os
 from repo2readme.llm.factory import create_llm
+from repo2readme.utils.retry import call_with_retry
 
 
 class ReviewSchema(BaseModel):
@@ -47,7 +48,8 @@ Return ONLY JSON in this format:
     partial_variables={"format_instructions":parser.get_format_instructions()}
     )
     chain=review_prompt | model | parser
-    response=chain.invoke({
-        'readme':readme
-    })
+    response = call_with_retry(
+        lambda: chain.invoke({'readme': readme}),
+        description="README review",
+    )
     return response

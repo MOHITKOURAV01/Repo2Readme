@@ -1,6 +1,7 @@
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from repo2readme.llm.factory import create_llm
+from repo2readme.utils.retry import call_with_retry
 import json
 import logging
 
@@ -45,10 +46,13 @@ def summarize_directory(dir_path, contents_summaries, provider=None, model_name=
     chain = prompt | model | parser
     try:
         contents_str = json.dumps(contents_summaries, indent=2)
-        return chain.invoke({
-            "dir_path": dir_path,
-            "contents": contents_str
-        })
+        return call_with_retry(
+            lambda: chain.invoke({
+                "dir_path": dir_path,
+                "contents": contents_str
+            }),
+            description=f"directory summary for {dir_path}",
+        )
     except Exception as e:
         logger.warning("Directory summary error for %s: %s", dir_path, e)
         return {"file_path": dir_path, "error": str(e)}

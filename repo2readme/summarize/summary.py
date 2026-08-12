@@ -5,6 +5,7 @@ import logging
 import os
 from langchain_core.output_parsers import JsonOutputParser
 from repo2readme.llm.factory import create_llm
+from repo2readme.utils.retry import call_with_retry
 
 
 
@@ -102,11 +103,14 @@ def summarize_file(
 ):
     try:
         chain = create_summarizer(file_path, language, content, provider, model_name, base_url,)
-        return chain.invoke({
-            "file_path": file_path.replace("\\", "/"),
-            "language": language,
-            "content": content
-        })
+        return call_with_retry(
+            lambda: chain.invoke({
+                "file_path": file_path.replace("\\", "/"),
+                "language": language,
+                "content": content
+            }),
+            description=f"summary for {file_path}",
+        )
     except Exception as e:
         logger.warning("Summary error for %s: %s", file_path, e)
         return {"file_path": file_path, "error": str(e)}

@@ -2,6 +2,7 @@ from langchain_core.prompts import PromptTemplate  # noqa: E402
 from langchain_core.output_parsers import StrOutputParser  # noqa: E402
 from typing import List  # noqa: E402
 from repo2readme.llm.factory import create_llm  # noqa: E402
+from repo2readme.utils.retry import call_with_retry  # noqa: E402
 
 
 def generate_readme(
@@ -96,11 +97,14 @@ Return ONLY valid Markdown
 
     parser = StrOutputParser()
     chain = prompt | model | parser
-    response = chain.invoke({
-        "summaries": summaries,
-        "tree_structure": tree_structure,
-        "latest_readme": latest_readme,
-        "feedback": feedback,
-        "dependency_overview": dependency_overview,
-    })
+    response = call_with_retry(
+        lambda: chain.invoke({
+            "summaries": summaries,
+            "tree_structure": tree_structure,
+            "latest_readme": latest_readme,
+            "feedback": feedback,
+            "dependency_overview": dependency_overview,
+        }),
+        description="README generation",
+    )
     return response
