@@ -14,8 +14,9 @@ as a side effect and never reach the command function.
 
 from __future__ import annotations
 
+import contextlib
 import logging
-from typing import Iterable
+from collections.abc import Iterable
 
 import click
 from rich.console import Console
@@ -62,10 +63,9 @@ def reset_logging(root: logging.Logger | None = None) -> None:
     for handler in list(root.handlers):
         if getattr(handler, _HANDLER_TAG, False):
             root.removeHandler(handler)
-            try:
+            # Closing must never take a run down.
+            with contextlib.suppress(Exception):
                 handler.close()
-            except Exception:  # pragma: no cover - closing must never break a run
-                pass
 
 
 def _damp_noisy_loggers(verbosity: int, names: Iterable[str] = NOISY_LOGGERS) -> None:
