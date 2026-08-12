@@ -10,6 +10,7 @@ class RepoLoader:
         max_file_size_kb=200,
         respect_gitignore=False,
         max_workers=None,
+        branch="main",
     ):
         self.source = source
         self.include_patterns = include_patterns
@@ -17,11 +18,13 @@ class RepoLoader:
         self.max_file_size_kb = max_file_size_kb
         self.respect_gitignore = respect_gitignore
         self.max_workers = max_workers
+        self.branch = branch
 
     def load(self, return_skip_info=False):
         if self.source.startswith("https://github.com/"):
             loader = UrlRepoLoader(
                 self.source,
+                branch=self.branch,
                 include_patterns=self.include_patterns,
                 exclude_patterns=self.exclude_patterns,
                 max_file_size_kb=self.max_file_size_kb,
