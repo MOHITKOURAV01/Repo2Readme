@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Iterable, Sequence
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 # Provider errors can be several hundred characters of JSON. Keep the console
 # readable; the full text is still available in the returned failure objects.
@@ -68,8 +69,8 @@ def is_failed_summary(entry: Any) -> bool:
     error = entry["error"]
     if error is None:
         return False
-    if isinstance(error, str) and not error.strip():
-        return False
+    if isinstance(error, str):
+        return bool(error.strip())
     return True
 
 
