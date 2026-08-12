@@ -16,8 +16,9 @@ import os
 import random
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ class RetryConfig:
         return self.max_retries + 1
 
     @classmethod
-    def from_env(cls, env: dict | None = None) -> "RetryConfig":
+    def from_env(cls, env: dict | None = None) -> RetryConfig:
         """Build a config from the environment, ignoring unusable values."""
         source = os.environ if env is None else env
 
