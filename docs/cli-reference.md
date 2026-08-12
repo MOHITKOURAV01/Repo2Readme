@@ -80,7 +80,7 @@ key environment variables.
 repo2readme providers
 ```
 
-```
+```text
         Supported providers
 Provider    Aliases  Default model            API key env var
 groq        -        openai/gpt-oss-120b      GROQ_API_KEY

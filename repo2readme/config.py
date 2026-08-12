@@ -66,10 +66,11 @@ def get_api_key(provider: str):
     # input() if Click isn't present.
     if click is not None:
         prompt_text = f"Enter your {spec.label} API key"
-        try:
-            api_key = click.prompt(prompt_text, hide_input=True, default="", show_default=False).strip()
-        except Exception:
-            api_key = input(f"Enter your {spec.label} API key: ").strip()
+        # Let click.Abort (Ctrl-C, EOF) propagate: catching it here would
+        # prompt a second time or surface a bare EOFError.
+        api_key = click.prompt(
+            prompt_text, hide_input=True, default="", show_default=False
+        ).strip()
     else:
         api_key = input(f"Enter your {spec.label} API key: ").strip()
 
