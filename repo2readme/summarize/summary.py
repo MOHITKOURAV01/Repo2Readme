@@ -78,8 +78,8 @@ def create_summarizer(file_path, language,
     content,provider=None, model_name=None, base_url=None,):
     model = create_llm(
         provider=provider or "groq",
-        model=model_name or "openai/gpt-oss-120b",
-        base_url=base_url, 
+        model=model_name,
+        base_url=base_url,
     )
     parser=JsonOutputParser()
     prompt = PromptTemplate(

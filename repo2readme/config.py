@@ -1,6 +1,9 @@
 import os
 import json
 from rich import print as rprint
+
+from repo2readme.providers import get_provider
+
 try:
     import click
 except Exception:
@@ -39,45 +42,40 @@ def get_api_keys():
     return groq, gemini
 
 def get_api_key(provider: str):
+    """Return the stored API key for a provider, prompting for it if missing.
+
+    Providers that do not authenticate (for example a local Ollama server)
+    return ``None`` instead of prompting.
+    """
+    spec = get_provider(provider)
+
+    if not spec.requires_api_key:
+        return None
+
     env = load_env()
-
-    provider_map = {
-        "groq": "GROQ_API_KEY",
-        "google": "GOOGLE_API_KEY",
-        "gemini": "GOOGLE_API_KEY",
-        "openai": "OPENAI_API_KEY",
-        "anthropic": "ANTHROPIC_API_KEY",
-        "openrouter": "OPENROUTER_API_KEY",
-        "together": "TOGETHER_API_KEY",
-    }
-
-    provider = provider.lower()
-
-    if provider not in provider_map:
-        raise ValueError(f"Unsupported provider: {provider}")
-
-    env_var = provider_map[provider]
+    env_var = spec.env_var
     api_key = env.get(env_var)
 
     if api_key:
         return api_key
 
-    rprint(f"[yellow]{provider} API key is missing![/yellow]\n")
+    rprint(f"[yellow]{spec.label} API key is missing![/yellow]\n")
 
     # Use Click prompt when available so CLI prompting integrates with Click
     # and is testable via click.testing.CliRunner. Fall back to built-in
     # input() if Click isn't present.
     if click is not None:
-        prompt_text = f"Enter your {provider} API key"
-        try:
-            api_key = click.prompt(prompt_text, hide_input=True, default="", show_default=False).strip()
-        except Exception:
-            api_key = input(f"Enter your {provider} API key: ").strip()
+        prompt_text = f"Enter your {spec.label} API key"
+        # Let click.Abort (Ctrl-C, EOF) propagate: catching it here would
+        # prompt a second time or surface a bare EOFError.
+        api_key = click.prompt(
+            prompt_text, hide_input=True, default="", show_default=False
+        ).strip()
     else:
-        api_key = input(f"Enter your {provider} API key: ").strip()
+        api_key = input(f"Enter your {spec.label} API key: ").strip()
 
     if not api_key or len(api_key) < 8:
-        raise ValueError(f"Invalid {provider} API key. Key must be at least 8 characters.")
+        raise ValueError(f"Invalid {spec.label} API key. Key must be at least 8 characters.")
 
     env[env_var] = api_key
     save_env(env)

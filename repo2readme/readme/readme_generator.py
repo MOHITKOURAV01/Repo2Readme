@@ -16,7 +16,7 @@ def generate_readme(
 ):
     model = create_llm(
         provider=provider or "groq",
-        model=model_name or "openai/gpt-oss-120b",
+        model=model_name,
         base_url=base_url,
     )
 

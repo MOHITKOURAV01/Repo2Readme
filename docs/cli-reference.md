@@ -21,6 +21,9 @@ repo2readme run [OPTIONS]
 | `--include <PATTERN>` | | Glob pattern for files to include, even if normally filtered out. Can be passed multiple times. |
 | `--exclude <PATTERN>` | | Glob pattern for files to exclude. Can be passed multiple times. |
 | `--max-file-size-kb <N>` | | Skip files larger than N KB. |
+| `--provider <NAME>` | | LLM provider to use. See `repo2readme providers`. |
+| `--model <NAME>` | | Model name. Defaults to the selected provider's default model. |
+| `--base-url <URL>` | | Base URL override for OpenAI-compatible providers. |
 
 You must provide exactly one of `--url` or `--local`.
 
@@ -66,6 +69,24 @@ Request size       : ~420.5 KB
 
 Dry run complete.
 No API requests were made.
+```
+
+## `repo2readme providers`
+
+Prints the supported LLM providers with their aliases, default models and API
+key environment variables.
+
+```bash
+repo2readme providers
+```
+
+```text
+        Supported providers
+Provider    Aliases  Default model            API key env var
+groq        -        openai/gpt-oss-120b      GROQ_API_KEY
+google      gemini   gemini-2.5-flash         GOOGLE_API_KEY
+...
+ollama      -        llama3                   not required
 ```
 
 ## `repo2readme reset`
