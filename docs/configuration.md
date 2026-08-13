@@ -85,6 +85,41 @@ This deletes the saved config file. You'll be prompted to re-enter keys on the n
 - Groq: https://console.groq.com
 - Google Gemini: https://aistudio.google.com
 
+## README post-processing
+
+The model's answer is not written to disk verbatim. Two things happen first.
+
+### Normalization (applied automatically)
+
+- A code fence wrapping the whole document is removed. Models often answer with
+  ```` ```markdown ... ``` ````, which would otherwise render the entire README
+  as one grey code block on GitHub.
+- Trailing whitespace is stripped from every line.
+- Runs of 3+ blank lines are collapsed to 2.
+- Leading blank lines are removed and the file ends with exactly one newline.
+
+Only mechanical changes are made here; nothing rewrites the model's wording.
+
+### Validation (reported, not rewritten)
+
+Problems that cannot be fixed without guessing at intent are logged as warnings:
+
+| Check | Reported when |
+|---|---|
+| `broken-anchor` | A table-of-contents link points at a heading that does not exist. |
+| `placeholder-image` | An image has an empty target, or one like `path/to/logo.png`. |
+| `missing-h1` | The document has no top-level heading. |
+| `duplicate-h1` | The document has more than one. |
+
+Anchors are computed the way GitHub computes them (lowercase, punctuation and
+emoji dropped, spaces to hyphens, `-1` suffixes for repeats), so the anchor
+check matches what actually renders.
+
+Everything inside fenced code blocks is ignored, so example Markdown in a usage
+section is never mistaken for the document's own headings, links or images.
+
+Run with `-v` to see these warnings if your console is configured to hide them.
+
 ## Summary Cache
 
 `repo2readme` maintains a local cache of file summaries to avoid redundant API calls.
