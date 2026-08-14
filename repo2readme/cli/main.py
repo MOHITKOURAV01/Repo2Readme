@@ -10,6 +10,8 @@ from repo2readme.config import reset_api_keys
 import os
 from collections import Counter
 
+from repo2readme import __version__
+from repo2readme.utils.logging_config import logging_options
 from repo2readme.utils.tree import generate_tree
 from repo2readme.cache import SummaryCache
 from repo2readme.loaders.repo_loader import RepoLoader
@@ -26,6 +28,7 @@ from repo2readme.services.reporting import partition_summaries, render_report
 
 
 @click.group()
+@click.version_option(version=__version__, prog_name="repo2readme")
 def main():
     """
     Use the `run` command to generate a README.
@@ -36,6 +39,7 @@ def main():
 
 
 @main.command()
+@logging_options
 @click.option("--url", "-u", help="GitHub repo URL")
 @click.option("--local", "-l", help="Local repo path")
 @click.option("--output", "-o", default=None, type=click.Path(), help="Save README to file")
