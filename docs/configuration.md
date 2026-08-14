@@ -167,3 +167,18 @@ It is recommended to add the cache directory to your project's `.gitignore`:
 ```
 .repo2readme/
 ```
+
+## Retry behaviour
+
+Every LLM call is retried on transient failures (rate limits, timeouts, dropped
+connections, malformed JSON responses) with exponential backoff and jitter.
+Permanent failures — bad API key, unsupported provider, context length exceeded
+— are not retried.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `REPO2README_MAX_RETRIES` | `2` | Retries after the first attempt. `0` disables retrying. |
+| `REPO2README_RETRY_BASE_DELAY` | `1.0` | Seconds before the first retry; doubles each attempt, capped at 30s. |
+
+If the provider returns a `Retry-After` header, or puts a "try again in 6.7s"
+hint in the error message, that value is used instead of the computed delay.
