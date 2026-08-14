@@ -105,8 +105,17 @@ def _render(
 
 
 def _root_name(root: str) -> str:
-    """Directory name of ``root``, tolerating a trailing separator."""
+    """
+    Directory name of ``root``, tolerating a trailing separator.
+
+    ``.`` and ``..`` are resolved first, so ``--local .`` names the project
+    rather than rendering the tree under a root called ``.``.
+    """
     normalized = root.replace("\\", "/").rstrip("/")
+
+    if not normalized or normalized in (".", "..") or normalized.endswith(("/.", "/..")):
+        normalized = os.path.abspath(root).replace("\\", "/").rstrip("/")
+
     name = os.path.basename(normalized)
     # A root of "/" (or a bare drive) has no basename; fall back to the path.
     return name or normalized or root

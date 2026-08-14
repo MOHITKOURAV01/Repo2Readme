@@ -101,6 +101,15 @@ def test_root_name_is_not_stripped_from_nested_paths(tmp_path):
     )
 
 
+def test_dot_root_is_resolved_to_the_directory_name(repo, monkeypatch):
+    """`--local .` should name the project, not render a root called `.`."""
+    monkeypatch.chdir(repo)
+
+    assert generate_tree(".").splitlines()[0] == "project/"
+    assert generate_tree("./").splitlines()[0] == "project/"
+    assert generate_tree(str(repo)) == generate_tree(".")
+
+
 def test_empty_repository_renders_just_the_root(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
