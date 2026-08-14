@@ -40,7 +40,11 @@ def main():
 
 @main.command()
 @logging_options
-@click.option("--url", "-u", help="GitHub repo URL")
+@click.option(
+    "--url",
+    "-u",
+    help="Git repository URL (https, ssh, git:// or git@host:path).",
+)
 @click.option("--local", "-l", help="Local repo path")
 @click.option("--output", "-o", default=None, type=click.Path(), help="Save README to file")
 @click.option("--force", "-f", is_flag=True, help="Overwrite output file without confirmation")

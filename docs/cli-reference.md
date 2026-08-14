@@ -2,7 +2,7 @@
 
 ## `repo2readme run`
 
-Generates a `README.md` by analyzing a repository (GitHub URL or local path).
+Generates a `README.md` by analyzing a repository (git URL or local path).
 
 ```bash
 repo2readme run [OPTIONS]
@@ -12,7 +12,7 @@ repo2readme run [OPTIONS]
 
 | Flag | Short | Description |
 |---|---|---|
-| `--url <URL>` | `-u` | GitHub repository URL to process. |
+| `--url <URL>` | `-u` | Git repository URL to clone and process. Any form `git clone` accepts. |
 | `--local <PATH>` | `-l` | Path to a local repository. |
 | `--output <FILE_PATH>` | `-o` | File path to save the generated README. Defaults to `README.md`. |
 | `--force` | `-f` | Overwrite the output file and skip the token estimation confirmation prompt. |
@@ -27,6 +27,46 @@ repo2readme run [OPTIONS]
 | `--base-url <URL>` | | Base URL override for OpenAI-compatible providers. |
 
 You must provide exactly one of `--url` or `--local`.
+
+### `--url`
+
+Any URL form `git clone` accepts works, not just `https://github.com/...`:
+
+```bash
+repo2readme run --url https://github.com/user/repo
+repo2readme run --url https://github.com/user/repo.git
+repo2readme run --url git@github.com:user/repo.git
+repo2readme run --url ssh://git@github.com/user/repo.git
+repo2readme run --url git://github.com/user/repo.git
+repo2readme run --url https://gitlab.com/group/subgroup/repo
+repo2readme run --url https://git.company.internal/team/service.git
+```
+
+Schemes are matched case-insensitively, and `git+ssh://` / `git+https://`
+prefixes are accepted. A `file://` URL is treated as a local path. Anything
+else (`s3://`, for example) is rejected up front with the list of supported
+schemes, rather than being read as a directory name.
+
+The repository is cloned shallowly (`--depth 1`) into a private temporary
+directory that is removed when the run finishes, so two runs against the same
+repository cannot interfere with each other.
+
+### `--branch`
+
+Branch to clone when using `--url`. Defaults to `main`.
+
+```bash
+repo2readme run --url https://github.com/user/repo --branch develop
+```
+
+### `--max-workers`
+
+Number of worker threads used to read and process files. Defaults to 4, capped
+at the number of files. This applies to both `--local` and `--url` runs.
+
+```bash
+repo2readme run --url https://github.com/user/repo --max-workers 8
+```
 
 ### `--respect-gitignore`
 
