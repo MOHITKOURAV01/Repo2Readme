@@ -119,12 +119,11 @@ def test_exclude_patterns_are_honoured(repo):
 
 
 def test_include_patterns_are_honoured(repo):
-    (repo / "package.json").write_text("{}", encoding="utf-8")
+    # A plain data file, not a manifest, so it stays ignored by default.
+    (repo / "data.json").write_text("{}", encoding="utf-8")
 
-    assert "package.json" not in generate_tree(str(repo))
-    assert "package.json" in generate_tree(
-        str(repo), include_patterns=["package.json"]
-    )
+    assert "data.json" not in generate_tree(str(repo))
+    assert "data.json" in generate_tree(str(repo), include_patterns=["data.json"])
 
 
 def test_size_limit_is_honoured(repo):
