@@ -16,6 +16,7 @@ repo2readme run [OPTIONS]
 | `--local <PATH>` | `-l` | Path to a local repository. |
 | `--output <FILE_PATH>` | `-o` | File path to save the generated README. Defaults to `README.md`. |
 | `--force` | `-f` | Overwrite the output file and skip the token estimation confirmation prompt. |
+| `--strict` | | Exit with a non-zero status if any file fails to summarize. |
 | `--respect-gitignore` | | Honor `.gitignore` and `.git/info/exclude` patterns during repository traversal. This is opt-in; default behavior is unchanged. |
 | `--dry-run` | | Preview the analysis (repo tree, token estimate, files to be processed) without making any API calls or requiring API keys. |
 | `--include <PATTERN>` | | Glob pattern for files to include, even if normally filtered out. Can be passed multiple times. |
@@ -34,6 +35,37 @@ Honor `.gitignore` and `.git/info/exclude` patterns during repository traversal.
 ```bash
 repo2readme run --local ./repo --respect-gitignore
 repo2readme run --url https://github.com/user/repo --respect-gitignore
+```
+
+### `--strict`
+
+Summarization is best-effort: a file that fails (rate limit, timeout, bad
+response) is skipped and the README is generated from the rest. Every run
+prints a report when that happens:
+
+```
+Summarization report
+
+Succeeded          : 37/40
+Failed             : 3/40
+
+3 file(s): Error code: 429 - rate limit reached for model ...
+    - src/api/client.py
+    - src/api/routes.py
+    - src/api/schema.py
+
+The README was generated from the files that succeeded.
+```
+
+Failed files are never passed to the README prompt. If *every* file fails the
+run stops with exit code 1 instead of asking the model to write a README from
+nothing.
+
+Use `--strict` in CI to turn any failure into a non-zero exit code. The README
+is still written first, so you keep the partial result:
+
+```bash
+repo2readme run --local . --output README.md --force --strict
 ```
 
 ### `--dry-run`

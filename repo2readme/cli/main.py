@@ -22,6 +22,7 @@ from repo2readme.services.environment import setup_api_keys
 from repo2readme.services.estimation import format_size, estimate_analysis_cost
 from repo2readme.services.summarization import generate_all_summaries, generate_hierarchical_summaries
 from repo2readme.services.orchestrator import run_pipeline
+from repo2readme.services.reporting import partition_summaries, render_report
 
 
 @click.group()
@@ -64,6 +65,12 @@ def main():
     help="Preview the analysis without making any API calls.",
 )
 @click.option(
+    "--strict",
+    is_flag=True,
+    default=False,
+    help="Exit with a non-zero status if any file fails to summarize.",
+)
+@click.option(
     "--respect-gitignore",
     is_flag=True,
     default=False,
@@ -97,7 +104,7 @@ def main():
     show_default=True,
     help="Branch to clone when using --url.",
 )
-def run(url, local, output, force, include_patterns, exclude_patterns, max_file_size_kb, dry_run, respect_gitignore, max_workers, provider, model, base_url, branch):
+def run(url, local, output, force, include_patterns, exclude_patterns, max_file_size_kb, dry_run, strict, respect_gitignore, max_workers, provider, model, base_url, branch):
     """ Use --url for GitHub repo url and --local for local repo
     """
     if not url and not local:
@@ -218,10 +225,24 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
                 progress=progress,
                 task_id=task
             )
-            
+
+        # Failure placeholders must not reach the roll-up or the README prompt,
+        # so split them out before anything else consumes them.
+        successful_summaries, failures = partition_summaries(summaries)
+        failures.extend(errors)
+        render_report(total_documents, len(successful_summaries), failures, rprint)
+
+        if total_documents and not successful_summaries:
+            rprint(
+                "\n[red]Every file failed to summarize, so there is nothing to "
+                "generate a README from.[/red]"
+            )
+            raise SystemExit(1)
+
+        with Progress() as progress:
             rollup_task = progress.add_task("[cyan]Generating directory summaries...[/cyan]", total=1)
             hierarchical_summaries = generate_hierarchical_summaries(
-                file_summaries=summaries,
+                file_summaries=successful_summaries,
                 provider=provider,
                 model=model,
                 base_url=base_url,
@@ -265,6 +286,12 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
                 f.write(readme)
 
             rprint(f"[green]Saved to {output}[/green]")
+
+        if strict and failures:
+            rprint(
+                f"[red]--strict: {len(failures)} file(s) failed to summarize.[/red]"
+            )
+            raise SystemExit(1)
 
     finally:
         if hasattr(loader_obj, "cleanup"):
