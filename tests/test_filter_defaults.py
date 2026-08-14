@@ -18,7 +18,6 @@ from repo2readme.utils.filter import (
     is_manifest_file,
 )
 
-
 # ---------------------------------------------------------------------------
 # Manifest allowlist
 # ---------------------------------------------------------------------------
@@ -97,11 +96,55 @@ def test_lock_files_are_still_excluded():
         assert reason == "protected large file"
 
 
-def test_real_env_files_are_still_excluded():
-    for env_file in (".env", ".env.local", ".env.production", ".env.test"):
-        assert is_manifest_file(env_file) is False
-        assert is_default_ignored(env_file) is True
-        assert classify_default_ignore(env_file) == "ignored_file"
+@pytest.mark.parametrize(
+    "env_file",
+    [
+        ".env",
+        ".env.local",
+        ".env.production",
+        ".env.test",
+        # Not in IGNORE_FILES, and their suffix is not in IGNORE_EXTENSIONS
+        # either, so these used to pass the filter and reach the model.
+        ".env.staging",
+        ".env.prod",
+        ".env.development.local",
+        ".env.production.local",
+        ".envrc",
+    ],
+)
+def test_real_env_files_are_excluded(env_file):
+    assert is_manifest_file(env_file) is False
+    assert is_default_ignored(env_file) is True
+    assert classify_default_ignore(env_file) == "ignored_file"
+
+
+def test_env_files_are_excluded_wherever_they_sit():
+    assert classify_default_ignore("config/.env.staging") == "ignored_file"
+    assert classify_default_ignore("services/api/.envrc") == "ignored_file"
+
+
+def test_env_templates_survive_the_family_rule():
+    for template in (".env.example", ".env.sample", ".env.template"):
+        assert classify_default_ignore(template) is None
+
+
+def test_a_file_merely_starting_with_env_is_unaffected():
+    """The rule is about dotfiles: environment.yml is an ordinary manifest."""
+    assert classify_default_ignore("environment.yml") is None
+    assert classify_default_ignore("env_loader.py") is None
+
+
+def test_an_explicit_include_still_admits_an_env_file(tmp_path):
+    """--include is evaluated before the default rules, by design."""
+    (tmp_path / ".env.staging").write_text("KEY=value", encoding="utf-8")
+
+    allowed, reason = github_file_filter(
+        ".env.staging",
+        include_patterns=[".env.staging"],
+        root_path=str(tmp_path),
+    )
+    assert allowed is True
+    assert reason == ""
 
 
 def test_ordinary_data_files_are_still_excluded():

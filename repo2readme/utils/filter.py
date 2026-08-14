@@ -298,6 +298,16 @@ def classify_default_ignore(path: str) -> str | None:
     if is_manifest_file(normalized_path):
         return None
 
+    # IGNORE_FILES enumerates a handful of dotenv names, which left the rest
+    # (.env.staging, .env.prod, .env.development.local, .envrc) to fall through
+    # to the extension check - and their suffix is not in IGNORE_EXTENSIONS
+    # either, so files holding real secrets reached the model. Match the whole
+    # family instead. The three checked-in templates are exempted by the
+    # manifest check above, and an explicit --include still wins, as it does
+    # for every default rule.
+    if basename.startswith(".env"):
+        return "ignored_file"
+
     if basename in IGNORE_FILES:
         return "ignored_file"
 

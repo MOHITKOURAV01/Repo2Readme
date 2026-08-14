@@ -87,8 +87,17 @@ This deletes the saved config file. You'll be prompted to re-enter keys on the n
 
 ## Which files are analyzed by default
 
-Before `--include` and `--exclude` are applied, a set of built-in rules decides
-which files are worth sending to the model.
+A set of built-in rules decides which files are worth sending to the model.
+They are **defaults**: the CLI flags are evaluated first, in this order.
+
+1. `--exclude` wins outright. A file matching an exclude pattern is never
+   analyzed, whatever else says otherwise.
+2. `--include` overrides the default rules. A file matching an include pattern
+   is analyzed even if the rules below would skip it — including a `.env` file,
+   if that is what you name. It still has to pass `--max-file-size-kb`.
+   Lock files are the one exception: a broad pattern like `*.json` will not
+   pull in `package-lock.json`; you have to name it exactly.
+3. Otherwise the default rules below apply.
 
 ### Manifests are always read
 
@@ -128,7 +137,17 @@ Two groups, because the names behave differently:
 `pkg/` and `packages/` are not ignored at all: in a checked-out repository they
 are the standard Go project layout and a JavaScript monorepo's workspace root.
 
-Use `--include` to pull in anything these rules skip:
+### Environment files
+
+Every `.env*` file is skipped by default — not only the common names, but
+`.env.staging`, `.env.prod`, `.env.development.local`, `.envrc` and anything
+else in the family — because they hold real credentials. The three checked-in
+templates (`.env.example`, `.env.sample`, `.env.template`) are the exception,
+since they exist to document variable *names*.
+
+### Overriding
+
+`--include` pulls in anything these rules skip:
 
 ```bash
 repo2readme run --local . --include "data/schema.json"
