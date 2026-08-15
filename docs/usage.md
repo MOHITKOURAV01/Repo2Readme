@@ -34,6 +34,38 @@ Pass `--force` to skip this prompt and overwrite the output file automatically.
 
 To check what *would* happen without using any API calls or requiring keys at all, use `--dry-run` — see [CLI Reference](./cli-reference.md#--dry-run) for details.
 
+## The repository tree
+
+`--dry-run` prints a tree, and the same tree is embedded in the generated README
+as the **Folder Structure** section:
+
+```
+project/
+├── src/
+│   ├── api/
+│   │   └── routes.py
+│   ├── main.py
+│   └── util.py
+├── tests/
+│   └── test_main.py
+└── README.md
+```
+
+It is built from the files that were actually loaded, so it always lists exactly
+what was analyzed — anything removed by `--exclude`, `--max-file-size-kb`,
+`--respect-gitignore` or the default ignore rules is absent from the tree too,
+and anything pulled back in with `--include` appears.
+
+Very large repositories are truncated so the tree does not dominate the prompt:
+at most 8 levels deep and 50 entries per directory. Truncation is always
+visible, never silent:
+
+```
+├── generated/
+│   └── ... (1,204 more, depth limit reached)
+└── ... (37 more)
+```
+
 ## Filtering files
 
 By default, common non-essential files (`.git`, `node_modules`, lock files, images, archives, etc.) are skipped. You can adjust this with `--include` / `--exclude` / `--max-file-size-kb` — see [Configuration](./configuration.md) and the [CLI Reference](./cli-reference.md).

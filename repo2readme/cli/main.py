@@ -12,7 +12,7 @@ from collections import Counter
 
 from repo2readme import __version__
 from repo2readme.utils.logging_config import logging_options
-from repo2readme.utils.tree import generate_tree
+from repo2readme.utils.tree import generate_tree_from_paths
 from repo2readme.cache import SummaryCache
 from repo2readme.loaders.repo_loader import RepoLoader
 from repo2readme.summarize.summary import get_prompt_template_hash
@@ -167,7 +167,13 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
     dependency_graph = build_dependency_graph(documents)
     dependency_overview = dependency_graph.to_markdown_summary()
 
-    tree = generate_tree(root_path)
+    # Build the tree from the documents that were actually loaded, so the
+    # "Folder Structure" section of the README cannot advertise files that were
+    # filtered out of the analysis.
+    tree = generate_tree_from_paths(
+        root_path,
+        [doc["metadata"].get("relative_path", "") for doc in documents],
+    )
 
     estimated_tokens, total_size_bytes, total_documents = estimate_analysis_cost(documents)
 

@@ -1,7 +1,7 @@
 
 from .filter import github_file_filter
 from .force_remove import force_remove
-from .tree import extract_tree, generate_tree
+from .tree import extract_tree, generate_tree, generate_tree_from_paths
 from .detect_language import detect_lang
 
 __all__ = [
@@ -10,4 +10,5 @@ __all__ = [
     "force_remove",
     "extract_tree",
     "generate_tree",
+    "generate_tree_from_paths",
 ]
