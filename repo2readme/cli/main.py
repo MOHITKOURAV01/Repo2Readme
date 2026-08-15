@@ -128,10 +128,15 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
         "model": model,
         "base_url": base_url,
     }
+    # autosave=False batches the writes: the whole cache file has to be
+    # rewritten for any change, so saving once per summarized file made a run
+    # cost one full serialization per file. The run flushes once at the end,
+    # in the finally block, so an interrupted run still keeps its work.
     summary_cache = SummaryCache(
         cache_dir=cache_dir,
         config=summarization_config,
         prompt_template_hash=get_prompt_template_hash(),
+        autosave=False,
     )
 
     with Progress() as progress:
@@ -308,6 +313,9 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
             raise SystemExit(1)
 
     finally:
+        # One write for the whole run, including when the run was interrupted
+        # part way through.
+        summary_cache.flush()
         if hasattr(loader_obj, "cleanup"):
             loader_obj.cleanup()
 

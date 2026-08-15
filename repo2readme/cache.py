@@ -10,6 +10,12 @@ logger = logging.getLogger(__name__)
 
 CACHE_SCHEMA_VERSION = "1.0"
 
+# How often an autosaving cache writes, in updates. The default of 1 keeps the
+# durability guarantee a library caller gets today: every put() is on disk when
+# it returns. The CLI knows its own lifecycle and turns autosave off, flushing
+# once at the end, which is where the quadratic cost actually mattered.
+DEFAULT_AUTOSAVE_EVERY = 1
+
 # Expected fields for each cache entry
 EXPECTED_ENTRY_FIELDS = {
     "file_path",
@@ -67,17 +73,93 @@ class SummaryCache:
     invalidated when summarization configuration (provider, model, base_url,
     prompt template) changes or when the cache schema version changes.
 
-    Thread-safe: all public methods acquire an instance-level lock.
+    Lookups and updates are O(1): the entry list that is written to disk is
+    mirrored by an in-memory index keyed on file path, holding the same entry
+    objects, so an update mutates the entry in place instead of rebuilding the
+    list.
+
+    Writes are decoupled from updates. With ``autosave`` enabled the cache
+    writes at most every ``autosave_every`` updates rather than on every one;
+    with it disabled the caller decides, by calling :meth:`flush` or by using
+    the cache as a context manager. Either way nothing is lost: a dirty flag
+    tracks whether the in-memory state differs from disk.
+
+    Thread-safe: all public methods acquire an instance-level lock, and the
+    disk write itself is serialised separately so workers are not blocked on
+    fsync while another thread is writing.
     """
 
-    def __init__(self, cache_dir: str, config: dict, prompt_template_hash: str):
+    def __init__(
+        self,
+        cache_dir: str,
+        config: dict,
+        prompt_template_hash: str,
+        autosave: bool = True,
+        autosave_every: int = DEFAULT_AUTOSAVE_EVERY,
+    ):
         self.cache_dir = cache_dir
         self.config = config
         self.prompt_template_hash = prompt_template_hash
         self.cache_file = os.path.join(cache_dir, "summaries.json")
         self.schema_version = CACHE_SCHEMA_VERSION
+        self.autosave = autosave
+        self.autosave_every = max(1, int(autosave_every))
         self._data: Optional[dict] = None
+        # file_path -> the entry dict that also lives in self._data["entries"]
+        self._index: dict[str, dict] = {}
+        self._dirty = False
+        self._pending_updates = 0
         self._lock = threading.Lock()
+        self._io_lock = threading.Lock()
+        self._stats = {
+            "hits": 0,
+            "misses": 0,
+            "updates": 0,
+            "removals": 0,
+            "invalidations": 0,
+            "disk_writes": 0,
+        }
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def __enter__(self) -> "SummaryCache":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.flush()
+
+    def flush(self) -> bool:
+        """
+        Write pending changes to disk. Returns True if a write happened.
+
+        Serialisation happens under the state lock; the disk write itself does
+        not, so summarization workers are not blocked while the file is being
+        replaced.
+        """
+        with self._lock:
+            if not self._dirty or self._data is None:
+                return False
+            payload = self._serialize()
+            self._dirty = False
+            self._pending_updates = 0
+
+        self._write(payload)
+        return True
+
+    def stats(self) -> dict:
+        """
+        Counters for the current process: cache hits and misses, in-memory
+        updates and removals, invalidations, and how many times the file was
+        actually rewritten.
+        """
+        with self._lock:
+            return dict(self._stats)
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
 
     def _ensure_cache_dir(self) -> None:
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -105,6 +187,15 @@ class SummaryCache:
             "config_hash": self._compute_config_hash(),
             "entries": [],
         }
+        self._index = {}
+
+    def _reindex(self) -> None:
+        """Point the index at the entry objects currently in ``_data``."""
+        self._index = {
+            entry["file_path"]: entry
+            for entry in self._data.get("entries", [])
+            if isinstance(entry, dict) and "file_path" in entry
+        }
 
     def _load(self) -> None:
         if self._data is not None:
@@ -125,38 +216,89 @@ class SummaryCache:
                 return
 
             self._data = data
+            self._reindex()
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"Cache file corrupted or unreadable, rebuilding: {e}")
             self._rebuild()
 
-    def _save(self) -> None:
-        """Atomically write cache to a temporary file, then replace the original."""
-        self._ensure_cache_dir()
-        try:
-            fd, tmp_path = tempfile.mkstemp(
-                dir=self.cache_dir, prefix="summaries_", suffix=".json.tmp"
-            )
+    def _serialize(self) -> str:
+        """Render the current state. Caller must hold ``_lock``."""
+        return json.dumps(self._data, indent=2)
+
+    def _write(self, payload: str) -> None:
+        """Atomically replace the cache file with ``payload``."""
+        with self._io_lock:
+            self._ensure_cache_dir()
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump(self._data, f, indent=2)
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(tmp_path, self.cache_file)
-            except Exception:
-                # Clean up temp file on failure
+                fd, tmp_path = tempfile.mkstemp(
+                    dir=self.cache_dir, prefix="summaries_", suffix=".json.tmp"
+                )
                 try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
-        except OSError as e:
-            logger.warning(f"Failed to write cache file: {e}")
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        f.write(payload)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(tmp_path, self.cache_file)
+                except Exception:
+                    # Clean up temp file on failure
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    raise
+            except OSError as e:
+                logger.warning(f"Failed to write cache file: {e}")
+                return
+
+        self._stats["disk_writes"] += 1
+
+    def _save(self) -> None:
+        """
+        Write immediately. Caller must hold ``_lock``.
+
+        Kept for callers that need the write to have happened by the time they
+        return; the batched path goes through :meth:`_touch` instead.
+        """
+        payload = self._serialize()
+        self._dirty = False
+        self._pending_updates = 0
+        self._write(payload)
+
+    def _touch(self) -> None:
+        """
+        Record that in-memory state changed. Caller must hold ``_lock``.
+
+        The whole file has to be rewritten for any change, so writing once per
+        entry made a run of N files cost N full serialisations of a file that
+        grows to hold N entries. Batching turns that into N / autosave_every.
+        """
+        self._dirty = True
+        self._pending_updates += 1
+
+        if self.autosave and self._pending_updates >= self.autosave_every:
+            self._save()
 
     def _find_entry(self, file_path: str) -> Optional[dict]:
-        for entry in self._data.get("entries", []):
-            if entry.get("file_path") == file_path:
-                return entry
-        return None
+        return self._index.get(file_path)
+
+    def _clear_entries(self, config_hash: str) -> None:
+        """Drop every entry and adopt the current configuration. Lock held."""
+        self._data["entries"] = []
+        self._index = {}
+        self._data["config_hash"] = config_hash
+        self._data["schema_version"] = self.schema_version
+        self._stats["invalidations"] += 1
+        # Invalidation used to be applied in memory and never written, so the
+        # stale entries and the stale config hash survived on disk and were
+        # re-detected (and re-logged) on every subsequent run.
+        self._dirty = True
+        self._pending_updates += 1
+        if self.autosave:
+            self._save()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def get(self, file_path: str, content: str, language: str) -> Optional[dict]:
         """
@@ -169,8 +311,8 @@ class SummaryCache:
             current_config_hash = self._compute_config_hash()
             if self._data.get("config_hash") != current_config_hash:
                 logger.info("Configuration changed, invalidating cache")
-                self._data["entries"] = []
-                self._data["config_hash"] = current_config_hash
+                self._clear_entries(current_config_hash)
+                self._stats["misses"] += 1
                 return None
 
             # Invalidate if schema version changed
@@ -180,17 +322,18 @@ class SummaryCache:
                     self._data.get("schema_version"),
                     self.schema_version,
                 )
-                self._data["entries"] = []
-                self._data["schema_version"] = self.schema_version
-                self._data["config_hash"] = current_config_hash
+                self._clear_entries(current_config_hash)
+                self._stats["misses"] += 1
                 return None
 
             entry = self._find_entry(file_path)
             if entry is None:
+                self._stats["misses"] += 1
                 return None
 
             content_hash = self._compute_content_hash(content)
             if entry.get("content_hash") != content_hash:
+                self._stats["misses"] += 1
                 return None
 
             # Language mismatch could indicate detection logic changed
@@ -201,8 +344,10 @@ class SummaryCache:
                     entry.get("language"),
                     language,
                 )
+                self._stats["misses"] += 1
                 return None
 
+            self._stats["hits"] += 1
             return entry.get("summary")
 
     def put(
@@ -214,24 +359,25 @@ class SummaryCache:
         with self._lock:
             self._load()
 
-            # Remove existing entry for this file
-            self._data["entries"] = [
-                e
-                for e in self._data.get("entries", [])
-                if e.get("file_path") != file_path
-            ]
+            payload = {
+                "file_path": file_path,
+                "content_hash": self._compute_content_hash(content),
+                "language": language,
+                "summary": summary,
+                "mtime": mtime,
+            }
 
-            self._data["entries"].append(
-                {
-                    "file_path": file_path,
-                    "content_hash": self._compute_content_hash(content),
-                    "language": language,
-                    "summary": summary,
-                    "mtime": mtime,
-                }
-            )
+            existing = self._index.get(file_path)
+            if existing is None:
+                self._data["entries"].append(payload)
+                self._index[file_path] = payload
+            else:
+                # The index holds the same object that is in the entry list, so
+                # updating in place keeps both in sync without an O(N) rebuild.
+                existing.update(payload)
 
-            self._save()
+            self._stats["updates"] += 1
+            self._touch()
 
     def get_deleted_files(self, current_files: set) -> list:
         """
@@ -252,9 +398,22 @@ class SummaryCache:
         with self._lock:
             self._load()
             paths_to_remove = set(file_paths)
-            self._data["entries"] = [
-                e
-                for e in self._data.get("entries", [])
-                if e.get("file_path") not in paths_to_remove
+            if not paths_to_remove:
+                return
+
+            remaining = [
+                entry
+                for entry in self._data.get("entries", [])
+                if entry.get("file_path") not in paths_to_remove
             ]
-            self._save()
+            removed = len(self._data.get("entries", [])) - len(remaining)
+            if not removed:
+                return
+
+            self._data["entries"] = remaining
+            self._reindex()
+            self._stats["removals"] += removed
+            self._dirty = True
+            self._pending_updates += 1
+            if self.autosave:
+                self._save()

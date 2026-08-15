@@ -156,6 +156,29 @@ The cache is automatically invalidated when any of the following change:
 
 When invalidation occurs, all existing cache entries are discarded and summaries are regenerated on the next run.
 
+### When the cache is written
+
+Rewriting the cache means rewriting the whole file, so writing once per
+summarized file made a run cost one full serialization per file. The CLI
+therefore batches: entries accumulate in memory and are written once, at the
+end of the run, including when the run is interrupted part way through.
+
+Used as a library, `SummaryCache` keeps writing on every `put()` by default.
+Pass `autosave=False` and call `flush()` yourself (or use it as a context
+manager) to batch, or `autosave_every=N` to write every N updates:
+
+```python
+from repo2readme.cache import SummaryCache
+
+with SummaryCache(cache_dir, config, prompt_hash, autosave=False) as cache:
+    for path, content, language in files:
+        cache.put(path, content, language, summarize(path), mtime)
+# flushed once on exit
+```
+
+`cache.stats()` reports hits, misses, in-memory updates, removals,
+invalidations and how many times the file was actually rewritten.
+
 ### Corruption handling
 
 If the cache file becomes corrupted (e.g., invalid JSON), `repo2readme` logs a warning and automatically rebuilds the cache. Execution continues normally.
