@@ -85,6 +85,74 @@ This deletes the saved config file. You'll be prompted to re-enter keys on the n
 - Groq: https://console.groq.com
 - Google Gemini: https://aistudio.google.com
 
+## Which files are analyzed by default
+
+A set of built-in rules decides which files are worth sending to the model.
+They are **defaults**: the CLI flags are evaluated first, in this order.
+
+1. `--exclude` wins outright. A file matching an exclude pattern is never
+   analyzed, whatever else says otherwise.
+2. `--include` overrides the default rules. A file matching an include pattern
+   is analyzed even if the rules below would skip it — including a `.env` file,
+   if that is what you name. It still has to pass `--max-file-size-kb`.
+   Lock files are the one exception: a broad pattern like `*.json` will not
+   pull in `package-lock.json`; you have to name it exactly.
+3. Otherwise the default rules below apply.
+
+### Manifests are always read
+
+Dependency, build and environment manifests are read even though their
+extension (`.json`, `.txt`) is otherwise ignored, because they are what the
+**Tech Stack**, **Installation** and **Environment Variables** sections of the
+generated README are built from:
+
+| Kind | Files |
+|---|---|
+| Python | `requirements.txt`, `requirements-*.txt`, `requirements/*.txt`, `constraints.txt`, `Pipfile` |
+| JavaScript / TypeScript | `package.json`, `tsconfig.json`, `jsconfig.json`, `bower.json`, `deno.json`, `turbo.json`, `nx.json`, `lerna.json`, `angular.json`, `nest-cli.json`, `jsr.json` |
+| PHP | `composer.json` |
+| Environment | `.env.example`, `.env.sample`, `.env.template` |
+
+Lock files (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`) are **not** in
+this list — they are large, generated, and add nothing a manifest doesn't
+already say. Real `.env` files (`.env`, `.env.local`, `.env.production`,
+`.env.test`) are never read.
+
+A manifest inside an ignored directory stays ignored, so a
+`node_modules/left-pad/package.json` is not analyzed.
+
+### Ignored directories
+
+Two groups, because the names behave differently:
+
+- **Ignored wherever they appear:** `node_modules`, `__pycache__`, `dist`,
+  `build`, `target`, `obj`, `coverage`, `.git`, `.venv`, `.next`, `.yarn`,
+  `.pnpm`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.gradle`, `.mvn`,
+  `.nuget`, `.bundle`, `.cargo`, `.firebase`, `.idea`, `.vscode`, `.cache`,
+  `bower_components`.
+- **Ignored only at the repository root:** `bin`, `env`, `venv`, `vendor`,
+  `public`, `logs`, `out`. Nested, these are ordinary source directories —
+  `src/bin/run.py` and `app/public/routes.rb` are analyzed normally.
+
+`pkg/` and `packages/` are not ignored at all: in a checked-out repository they
+are the standard Go project layout and a JavaScript monorepo's workspace root.
+
+### Environment files
+
+Every `.env*` file is skipped by default — not only the common names, but
+`.env.staging`, `.env.prod`, `.env.development.local`, `.envrc` and anything
+else in the family — because they hold real credentials. The three checked-in
+templates (`.env.example`, `.env.sample`, `.env.template`) are the exception,
+since they exist to document variable *names*.
+
+### Overriding
+
+`--include` pulls in anything these rules skip:
+
+```bash
+repo2readme run --local . --include "data/schema.json"
+```
+
 ## README post-processing
 
 The model's answer is not written to disk verbatim. Two things happen first.
