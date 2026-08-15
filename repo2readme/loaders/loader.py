@@ -7,15 +7,55 @@ from typing import Iterable  # noqa: F401
 
 from repo2readme.utils.filter import github_file_filter
 from repo2readme.utils.force_remove import force_remove
-from repo2readme.utils.gitignore import is_gitignored
+from repo2readme.utils.gitignore import is_gitignored  # noqa: F401
+from repo2readme.loaders.source import repo_name_from_url
 from repo2readme.loaders.traversal import TraversalPipeline
-from collections import OrderedDict
+from collections import OrderedDict  # noqa: F401
 from langchain_core.documents import Document
 
 # Backward-compatible placeholder: tests patch this symbol.
 # The actual import is kept lazy inside the local loader to avoid importing
 # langchain during normal simple-file reads.
 TextLoader = None  # type: ignore[assignment,misc]
+
+
+def _run_traversal(
+    folder_path: str,
+    include_patterns=None,
+    exclude_patterns=None,
+    max_file_size_kb: int | None = 200,
+    respect_gitignore: bool = False,
+    max_workers: int | None = None,
+):
+    """
+    Walk ``folder_path`` with the shared traversal pipeline.
+
+    Both loaders funnel through here, so symlink handling, gitignore support,
+    binary detection, skip reasons and the parallel worker pool behave
+    identically whether the repository was cloned or was already on disk.
+    """
+    pipeline = TraversalPipeline(
+        folder_path=folder_path,
+        include_patterns=include_patterns,
+        exclude_patterns=exclude_patterns,
+        max_file_size_kb=max_file_size_kb,
+        respect_gitignore=respect_gitignore,
+        max_workers=max_workers,
+    )
+
+    documents, ctx = pipeline.run()
+
+    # Convert DocumentResult back to langchain Document objects for
+    # backward compatibility
+    docs = [
+        Document(
+            page_content=doc_result.page_content,
+            metadata=dict(doc_result.metadata),
+        )
+        for doc_result in documents
+    ]
+
+    return docs, ctx
 
 
 class LocalRepoLoader:
@@ -64,29 +104,14 @@ class LocalRepoLoader:
         if not os.path.exists(self.folder_path):
             raise FileNotFoundError(f"Folder not found: {self.folder_path}")
 
-        # Use the new traversal pipeline for modular, parallel processing
-        pipeline = TraversalPipeline(
-            folder_path=self.folder_path,
+        docs, ctx = _run_traversal(
+            self.folder_path,
             include_patterns=self.include_patterns,
             exclude_patterns=self.exclude_patterns,
             max_file_size_kb=self.max_file_size_kb,
             respect_gitignore=self.respect_gitignore,
             max_workers=self.max_workers,
         )
-
-        documents, ctx = pipeline.run()
-
-        # Convert DocumentResult back to langchain Document objects for
-        # backward compatibility
-        from langchain_core.documents import Document
-
-        docs = []
-        for doc_result in documents:
-            langchain_doc = Document(
-                page_content=doc_result.page_content,
-                metadata=dict(doc_result.metadata),
-            )
-            docs.append(langchain_doc)
 
         if return_skip_info:
             return docs, self.folder_path, ctx.skipped
@@ -102,6 +127,7 @@ class UrlRepoLoader:
         exclude_patterns=None,
         max_file_size_kb: int | None = 200,
         respect_gitignore: bool = False,
+        max_workers: int | None = None,
     ):
         if max_file_size_kb is not None and max_file_size_kb < 0:
             raise ValueError(
@@ -113,11 +139,11 @@ class UrlRepoLoader:
         self.exclude_patterns = exclude_patterns
         self.max_file_size_kb = max_file_size_kb
         self.respect_gitignore = respect_gitignore
+        self.max_workers = max_workers
         self.temp_dir = None
 
     def get_repo_name(self):
-        name = self.clone_url.rstrip("/").split("/")[-1]
-        return name.removesuffix(".git")
+        return repo_name_from_url(self.clone_url)
 
     def _should_include(self, path: str) -> bool:
         if self.temp_dir:
@@ -143,167 +169,66 @@ class UrlRepoLoader:
         except ValueError:
             return False
 
-    def load(self, return_skip_info=False):
-        repo_name = self.get_repo_name()
-        base_temp = tempfile.gettempdir()
-        default_temp_dir = os.path.join(base_temp, repo_name)
+    def _prepare_clone_dir(self) -> None:
+        """
+        Choose the directory to clone into.
 
-        # Only create a new temp directory if one wasn't already set (e.g., by tests)
+        The destination used to be ``<tempdir>/<repo-name>``, which is
+        predictable: another process (or a second run of this tool against the
+        same repository) can create it first, and it was unconditionally
+        removed with ``rmtree`` before cloning. ``mkdtemp`` gives a private,
+        unpredictable directory instead, so two concurrent runs no longer
+        clobber each other.
+
+        A destination set explicitly on the instance is still honoured, and
+        still cleaned before the clone.
+        """
         if self.temp_dir is None:
-            self.temp_dir = default_temp_dir
+            self.temp_dir = tempfile.mkdtemp(prefix="repo2readme-")
+            return
 
-        # ALWAYS clean before cloning
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir, onerror=force_remove)
-
         os.makedirs(self.temp_dir, exist_ok=True)
 
-        # Clone repository using git command directly
+    def load(self, return_skip_info=False):
+        self._prepare_clone_dir()
+
         try:
             subprocess.run(
-                ["git", "clone", "--branch", self.branch, "--depth", "1", self.clone_url, self.temp_dir],
+                [
+                    "git",
+                    "clone",
+                    "--branch",
+                    self.branch,
+                    "--depth",
+                    "1",
+                    self.clone_url,
+                    self.temp_dir,
+                ],
                 check=True,
                 capture_output=True,
-                text=True
+                text=True,
             )
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Failed to clone repository: {e.stderr}") from e
 
-        docs = []
-        skipped: list[tuple[str, str]] = [] if return_skip_info else []
-        visited_dirs: set[str] = set()
-        root_resolved = os.path.realpath(self.temp_dir)
-        visited_dirs.add(root_resolved)
-
-        for current, dirs, files in os.walk(self.temp_dir):
-            new_dirs = []
-            dirs.sort(key=lambda d: (os.path.islink(os.path.join(current, d)), d))
-            for directory in dirs:
-                full_dir_path = os.path.join(current, directory)
-                rel_dir_path = os.path.relpath(full_dir_path, self.temp_dir).replace("\\", "/")
-
-                allowed, reason = github_file_filter(
-                    rel_dir_path,
-                    include_patterns=self.include_patterns,
-                    exclude_patterns=self.exclude_patterns,
-                    root_path=self.temp_dir,
-                    max_file_size_kb=None,
-                )
-
-                if not allowed:
-                    if return_skip_info:
-                        skipped.append((rel_dir_path + "/", reason))
-                    continue
-
-                if self.respect_gitignore and is_gitignored(full_dir_path, self.temp_dir):
-                    if return_skip_info:
-                        skipped.append((rel_dir_path + "/", "ignored by gitignore"))
-                    continue
-
-                resolved_path = os.path.realpath(full_dir_path)
-
-                if resolved_path in visited_dirs:
-                    if return_skip_info:
-                        skipped.append((rel_dir_path + "/", "circular or duplicate symbolic link"))
-                    continue
-
-                if os.path.islink(full_dir_path):
-                    if not os.path.isdir(resolved_path):
-                        if return_skip_info:
-                            skipped.append((rel_dir_path + "/", "broken symbolic link"))
-                        continue
-
-                    if not self._is_within_root(resolved_path, root_resolved):
-                        if return_skip_info:
-                            skipped.append((rel_dir_path + "/", "symbolic link outside repository"))
-                        continue
-
-                visited_dirs.add(resolved_path)
-                new_dirs.append(directory)
-
-            dirs[:] = new_dirs
-
-            for file_name in files:
-                full_path = os.path.join(current, file_name)
-                rel_path = os.path.relpath(full_path, self.temp_dir).replace("\\", "/")
-
-                if os.path.islink(full_path):
-                    resolved_path = os.path.realpath(full_path)
-                    if not os.path.exists(resolved_path):
-                        if return_skip_info:
-                            skipped.append((rel_path, "broken symbolic link"))
-                        continue
-                    if not self._is_within_root(resolved_path, root_resolved):
-                        if return_skip_info:
-                            skipped.append((rel_path, "symbolic link outside repository"))
-                        continue
-
-                allowed, reason = github_file_filter(
-                    rel_path,
-                    include_patterns=self.include_patterns,
-                    exclude_patterns=self.exclude_patterns,
-                    root_path=self.temp_dir,
-                    max_file_size_kb=self.max_file_size_kb,
-                )
-
-                if not allowed:
-                    if return_skip_info:
-                        skipped.append((rel_path, reason))
-                    continue
-
-                if self.respect_gitignore and is_gitignored(full_path, self.temp_dir):
-                    if return_skip_info:
-                        skipped.append((rel_path, "ignored by gitignore"))
-                    continue
-                # Fast path: plain UTF-8 read. Only fall back to TextLoader on
-                # UnicodeDecodeError to keep LangChain imports lazy.
-                try:
-                    with open(full_path, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    docs.append(
-                        Document(
-                            page_content=content,
-                            metadata=OrderedDict([
-                                ("file_path", full_path.replace("\\", "/")),
-                                ("file_name", file_name),
-                                ("file_type", os.path.splitext(file_name)[1].lower()),
-                                ("relative_path", rel_path),
-                            ]),
-                        )
-                    )
-                except UnicodeDecodeError:
-                    # Fallback for files with non-UTF-8 encodings.
-                    # If TextLoader cannot be imported or used due to an
-                    # environment issue (e.g. numpy binary incompatibility),
-                    # treat the file as failed rather than crashing.
-                    try:
-                        from langchain_community.document_loaders import TextLoader
-                        loader = TextLoader(full_path, autodetect_encoding=True)
-                        loaded_docs = loader.load()
-                        for doc in loaded_docs:
-                            doc.metadata["file_path"] = full_path.replace("\\", "/")
-                            doc.metadata["file_name"] = file_name
-                            doc.metadata["file_type"] = os.path.splitext(file_name)[1].lower()
-                            doc.metadata["relative_path"] = rel_path
-                        docs.extend(loaded_docs)
-                    except UnicodeDecodeError as error:
-                        if return_skip_info:
-                            skipped.append((rel_path, f"encoding_error: {error}"))
-                    except OSError as error:
-                        if return_skip_info:
-                            skipped.append((rel_path, f"permission_error: {error}"))
-                    except Exception as error:
-                        # Catch environment-specific failures (e.g. numpy binary
-                        # incompatibility when importing langchain) and treat
-                        # them as load errors instead of crashing.
-                        if return_skip_info:
-                            skipped.append((rel_path, f"load_error: {error}"))
-                except OSError as error:
-                    if return_skip_info:
-                        skipped.append((rel_path, f"permission_error: {error}"))
+        # The clone is now an ordinary directory, so it goes through the same
+        # traversal pipeline as a local repository. This is what makes
+        # --max-workers, binary detection and the repository metadata apply to
+        # remote repositories too; they were previously local-only because this
+        # class hand-rolled its own os.walk.
+        docs, ctx = _run_traversal(
+            self.temp_dir,
+            include_patterns=self.include_patterns,
+            exclude_patterns=self.exclude_patterns,
+            max_file_size_kb=self.max_file_size_kb,
+            respect_gitignore=self.respect_gitignore,
+            max_workers=self.max_workers,
+        )
 
         if return_skip_info:
-            return docs, self.temp_dir, skipped
+            return docs, self.temp_dir, ctx.skipped
         return docs, self.temp_dir
 
     def cleanup(self):
