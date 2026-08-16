@@ -271,6 +271,16 @@ def test_line_endings_are_not_rewritten(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def flat(output: str) -> str:
+    """CLI output with the line wrapping taken out.
+
+    Rich wraps to the terminal width, which is not the same on a developer's
+    machine as it is in CI, so a message can arrive with a newline in the
+    middle of a phrase. Collapsing whitespace makes these assertions depend on
+    what was said rather than on how wide the terminal was.
+    """
+    return " ".join(output.split())
+
 def _repo(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -315,7 +325,7 @@ class TestCliOutputValidation:
         )
 
         assert result.exit_code == 2
-        assert "is a directory" in result.output
+        assert "is a directory" in flat(result.output)
         assert called["pipeline"] == 0
 
     def test_a_missing_directory_is_created_up_front(self, monkeypatch, tmp_path):
@@ -348,7 +358,7 @@ class TestCliOutputValidation:
         )
 
         assert result.exit_code == 2
-        assert "does not exist" in result.output
+        assert "does not exist" in flat(result.output)
         assert not destination.parent.exists()
 
     def test_the_dry_run_validates_the_path_too(self, monkeypatch, tmp_path):
@@ -379,7 +389,7 @@ class TestCliOutputWriting:
 
         assert result.exit_code == 0
         assert destination.read_text(encoding="utf-8") == README
-        assert "Saved to" in result.output
+        assert "Saved to" in flat(result.output)
 
     def test_backup_keeps_the_previous_readme(self, monkeypatch, tmp_path):
         _patch_pipeline(monkeypatch)
@@ -401,7 +411,7 @@ class TestCliOutputWriting:
 
         assert result.exit_code == 0
         assert backup_path_for(destination).read_text(encoding="utf-8") == "hand written"
-        assert "kept at" in result.output
+        assert "kept at" in flat(result.output)
 
     def test_a_write_failure_prints_the_readme_instead_of_losing_it(
         self, monkeypatch, tmp_path
@@ -420,9 +430,9 @@ class TestCliOutputWriting:
         )
 
         assert result.exit_code == 1
-        assert "disk on fire" in result.output
+        assert "disk on fire" in flat(result.output)
         # The generated README is on stdout rather than thrown away.
-        assert "Title" in result.output
+        assert "Title" in flat(result.output)
 
     def test_declining_the_overwrite_leaves_the_file_alone(self, monkeypatch, tmp_path):
         _patch_pipeline(monkeypatch)
