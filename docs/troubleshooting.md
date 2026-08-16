@@ -1,5 +1,23 @@
 # Troubleshooting
 
+## The run finished but the file was not written
+
+The output path is now checked before any API call, so this should surface as
+an immediate exit code 2 with a message naming the problem — a path that is a
+directory, a parent that cannot be created, or a file that is not writable.
+
+If a write fails for some other reason (a full disk, a filesystem going away
+mid-run), the generated README is printed to stdout so the run is not wasted,
+and the exit code is 1. Redirect it if you want to keep it:
+
+```bash
+repo2readme run --local . --output /mnt/full/README.md > README.md
+```
+
+An existing README is never truncated before the new one is complete: the write
+goes to a temporary file and is renamed into place. Use `--backup` to keep a
+`.bak` copy of what was replaced.
+
 ## "Missing API key" or repeated key prompts
 
 Your keys may not be saved correctly. Try setting them as environment variables instead:

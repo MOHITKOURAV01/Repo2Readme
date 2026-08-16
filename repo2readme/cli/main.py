@@ -4,6 +4,7 @@ load_dotenv()
 import click
 from rich import print as rprint
 from rich.console import Console
+from rich.markup import escape
 from rich.progress import Progress
 from rich.table import Table
 from repo2readme.config import reset_api_keys
@@ -12,6 +13,12 @@ from collections import Counter
 
 from repo2readme import __version__
 from repo2readme.utils.logging_config import logging_options
+from repo2readme.utils.output import (
+    OutputPathError,
+    backup_path_for,
+    prepare_output_path,
+    write_readme,
+)
 from repo2readme.utils.tree import generate_tree_from_paths
 from repo2readme.cache import SummaryCache
 from repo2readme.loaders.repo_loader import RepoLoader
@@ -48,6 +55,18 @@ def main():
 @click.option("--local", "-l", help="Local repo path")
 @click.option("--output", "-o", default=None, type=click.Path(), help="Save README to file")
 @click.option("--force", "-f", is_flag=True, help="Overwrite output file without confirmation")
+@click.option(
+    "--backup",
+    is_flag=True,
+    default=False,
+    help="Keep a copy of the file being replaced, alongside it with a .bak suffix.",
+)
+@click.option(
+    "--create-dirs/--no-create-dirs",
+    default=True,
+    show_default=True,
+    help="Create the output file's parent directory when it does not exist.",
+)
 @click.option(
     "--include",
     "include_patterns",
@@ -112,7 +131,7 @@ def main():
     show_default=True,
     help="Branch to clone when using --url.",
 )
-def run(url, local, output, force, include_patterns, exclude_patterns, max_file_size_kb, dry_run, strict, respect_gitignore, max_workers, provider, model, base_url, branch):
+def run(url, local, output, force, backup, create_dirs, include_patterns, exclude_patterns, max_file_size_kb, dry_run, strict, respect_gitignore, max_workers, provider, model, base_url, branch):
     """ Use --url for GitHub repo url and --local for local repo
     """
     if not url and not local:
@@ -120,6 +139,20 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
         return
 
     source = url if url else local
+
+    # Check the destination before anything is loaded or summarized. This used
+    # to happen in the open() at the very end of the run, so a missing parent
+    # directory threw away every API call the run had already paid for.
+    output_target = None
+    if output is not None:
+        try:
+            output_target = prepare_output_path(output, create_parents=create_dirs)
+        except OutputPathError as e:
+            rprint(f"[red]{escape(str(e))}[/red]")
+            raise SystemExit(2) from e
+
+        if output_target.created_parent:
+            rprint(f"[green]Created {output_target.path.parent}[/green]")
 
     # Initialize file summary cache
     cache_dir = os.path.join(os.getcwd(), ".repo2readme", "cache")
@@ -287,13 +320,16 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
             base_url=base_url
         )
 
-        if output is None:
+        if output_target is None:
             rprint("\n[green]Generated README:[/green]\n")
             rprint(readme)
         else:
-            if os.path.exists(output) and not force:
+            destination = output_target.path
+            replacing = destination.exists()
+
+            if replacing and not force:
                 should_overwrite = click.confirm(
-                    f"{output} already exists. Do you want to overwrite it?",
+                    f"{destination} already exists. Do you want to overwrite it?",
                     default=False,
                 )
 
@@ -301,10 +337,19 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
                     rprint("[yellow]Output file was not overwritten.[/yellow]")
                     return
 
-            with open(output, "w", encoding="utf-8") as f:
-                f.write(readme)
+            try:
+                write_readme(destination, readme, backup=backup)
+            except OSError as e:
+                # The README exists and was paid for; printing it is the only
+                # way the user keeps it. Silently discarding it is not.
+                rprint(f"\n[red]Could not write {destination}: {escape(str(e))}[/red]")
+                rprint("[yellow]Printing the README instead.[/yellow]\n")
+                rprint(readme)
+                raise SystemExit(1) from e
 
-            rprint(f"[green]Saved to {output}[/green]")
+            rprint(f"[green]Saved to {destination}[/green]")
+            if backup and replacing:
+                rprint(f"[green]Previous version kept at {backup_path_for(destination)}[/green]")
 
         if strict and failures:
             rprint(

@@ -14,8 +14,10 @@ repo2readme run [OPTIONS]
 |---|---|---|
 | `--url <URL>` | `-u` | Git repository URL to clone and process. Any form `git clone` accepts. |
 | `--local <PATH>` | `-l` | Path to a local repository. |
-| `--output <FILE_PATH>` | `-o` | File path to save the generated README. Defaults to `README.md`. |
+| `--output <FILE_PATH>` | `-o` | File path to save the generated README. Printed to stdout when omitted. |
 | `--force` | `-f` | Overwrite the output file and skip the token estimation confirmation prompt. |
+| `--backup` | | Keep a copy of the file being replaced, alongside it with a `.bak` suffix. |
+| `--create-dirs` / `--no-create-dirs` | | Create the output file's parent directory when missing. On by default. |
 | `--strict` | | Exit with a non-zero status if any file fails to summarize. |
 | `--respect-gitignore` | | Honor `.gitignore` and `.git/info/exclude` patterns during repository traversal. This is opt-in; default behavior is unchanged. |
 | `--dry-run` | | Preview the analysis (repo tree, token estimate, files to be processed) without making any API calls or requiring API keys. |
@@ -58,6 +60,42 @@ Branch to clone when using `--url`. Defaults to `main`.
 ```bash
 repo2readme run --url https://github.com/user/repo --branch develop
 ```
+
+### `--output`
+
+Where to save the generated README. Without it, the README is printed to
+stdout.
+
+```bash
+repo2readme run --local . --output README.md
+repo2readme run --local . --output docs/generated/README.md   # directory created
+```
+
+The path is checked when the command starts, not when the file is written — a
+path that cannot be written fails in a second, with exit code 2, instead of
+after the whole repository has been summarized:
+
+```
+/path/to/repo is a directory. Give --output a file path, for example
+/path/to/repo/README.md.
+```
+
+Missing parent directories are created. Pass `--no-create-dirs` to have a
+missing directory be an error instead.
+
+The write itself goes through a temporary file in the destination's own
+directory and then an atomic rename, so an interrupted or failed write leaves
+the previous README exactly as it was. `--backup` additionally keeps a copy of
+what was replaced:
+
+```bash
+repo2readme run --local . --output README.md --backup
+# Saved to /path/to/README.md
+# Previous version kept at /path/to/README.md.bak
+```
+
+If the write fails anyway, the generated README is printed to stdout rather
+than discarded, and the run exits 1.
 
 ### `--max-workers`
 
