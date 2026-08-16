@@ -13,18 +13,41 @@ from collections import Counter
 from repo2readme import __version__
 from repo2readme.utils.logging_config import logging_options
 from repo2readme.utils.tree import generate_tree_from_paths
-from repo2readme.cache import SummaryCache
+from repo2readme.cache import (
+    DEFAULT_MAX_AGE_DAYS,
+    DEFAULT_MAX_ENTRIES,
+    SummaryCache,
+)
 from repo2readme.loaders.repo_loader import RepoLoader
 from repo2readme.summarize.summary import get_prompt_template_hash
 from repo2readme.dependency_graph import build_dependency_graph
 from repo2readme.providers import PROVIDERS, provider_choices_help
 
 # Import new services
+from repo2readme.services.cache_admin import (
+    build_info_lines,
+    cache_info,
+    clear_cache,
+    default_cache_dir,
+    prune_cache,
+)
 from repo2readme.services.environment import setup_api_keys
 from repo2readme.services.estimation import format_size, estimate_analysis_cost
 from repo2readme.services.summarization import generate_all_summaries, generate_hierarchical_summaries
 from repo2readme.services.orchestrator import run_pipeline
 from repo2readme.services.reporting import partition_summaries, render_report
+
+
+def cache_namespace(url: str | None, local: str | None) -> str:
+    """Identify the repository a cache entry belongs to.
+
+    A URL identifies itself. A local path is made absolute, so ``--local .``
+    and ``--local /home/me/project`` from inside that project are one
+    repository rather than two.
+    """
+    if url:
+        return str(url).strip()
+    return os.path.abspath(os.path.expanduser(str(local)))
 
 
 @click.group()
@@ -91,6 +114,20 @@ def main():
     help="Number of parallel worker threads for file processing (default: 4, capped at file count)",
 )
 @click.option(
+    "--cache-max-entries",
+    default=DEFAULT_MAX_ENTRIES,
+    show_default=True,
+    type=int,
+    help="Keep at most this many cached summaries, dropping the least recently used.",
+)
+@click.option(
+    "--cache-max-age-days",
+    default=DEFAULT_MAX_AGE_DAYS,
+    show_default=True,
+    type=float,
+    help="Drop cached summaries older than this many days.",
+)
+@click.option(
     "--provider",
     default=None,
     help=f"LLM provider ({provider_choices_help()}). Run 'repo2readme providers' for details.",
@@ -112,7 +149,7 @@ def main():
     show_default=True,
     help="Branch to clone when using --url.",
 )
-def run(url, local, output, force, include_patterns, exclude_patterns, max_file_size_kb, dry_run, strict, respect_gitignore, max_workers, provider, model, base_url, branch):
+def run(url, local, output, force, include_patterns, exclude_patterns, max_file_size_kb, dry_run, strict, respect_gitignore, max_workers, cache_max_entries, cache_max_age_days, provider, model, base_url, branch):
     """ Use --url for GitHub repo url and --local for local repo
     """
     if not url and not local:
@@ -122,7 +159,7 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
     source = url if url else local
 
     # Initialize file summary cache
-    cache_dir = os.path.join(os.getcwd(), ".repo2readme", "cache")
+    cache_dir = default_cache_dir()
     summarization_config = {
         "provider": provider,
         "model": model,
@@ -132,11 +169,20 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
     # rewritten for any change, so saving once per summarized file made a run
     # cost one full serialization per file. The run flushes once at the end,
     # in the finally block, so an interrupted run still keeps its work.
+    #
+    # The namespace is what this run is analysing. The cache directory is the
+    # current working directory rather than the repository, so runs against
+    # several repositories from one place share a file; without a namespace
+    # each run saw the others' entries as deleted files and evicted them, and
+    # two repositories analysed from the same directory never got a cache hit.
     summary_cache = SummaryCache(
         cache_dir=cache_dir,
         config=summarization_config,
         prompt_template_hash=get_prompt_template_hash(),
         autosave=False,
+        namespace=cache_namespace(url, local),
+        max_entries=cache_max_entries,
+        max_age_days=cache_max_age_days,
     )
 
     with Progress() as progress:
@@ -313,6 +359,15 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
             raise SystemExit(1)
 
     finally:
+        # Apply the bounds before the write, so the file that lands on disk is
+        # already the pruned one rather than growing until someone notices.
+        pruned = summary_cache.prune()
+        if pruned.removed:
+            rprint(
+                f"[dim]Cache: removed {pruned.removed:,} old entries, "
+                f"{pruned.entries_after:,} remain.[/dim]"
+            )
+
         # One write for the whole run, including when the run was interrupted
         # part way through.
         summary_cache.flush()
@@ -343,6 +398,98 @@ def providers():
         "\nUse with: [cyan]repo2readme run --local . --provider <name> "
         "[--model <model>][/cyan]"
     )
+
+
+@main.group()
+def cache():
+    """Inspect and manage the summary cache."""
+
+
+@cache.command("info")
+@click.option(
+    "--cache-dir",
+    default=None,
+    type=click.Path(),
+    help="Cache directory to inspect. Defaults to ./.repo2readme/cache.",
+)
+def cache_info_command(cache_dir):
+    """Show what the summary cache currently holds."""
+    for line in build_info_lines(cache_info(cache_dir or default_cache_dir())):
+        rprint(line)
+
+
+@cache.command("prune")
+@click.option(
+    "--cache-dir",
+    default=None,
+    type=click.Path(),
+    help="Cache directory to prune. Defaults to ./.repo2readme/cache.",
+)
+@click.option(
+    "--max-entries",
+    default=DEFAULT_MAX_ENTRIES,
+    show_default=True,
+    type=int,
+    help="Keep at most this many entries, dropping the least recently used.",
+)
+@click.option(
+    "--max-age-days",
+    default=DEFAULT_MAX_AGE_DAYS,
+    show_default=True,
+    type=float,
+    help="Drop entries older than this many days.",
+)
+def cache_prune_command(cache_dir, max_entries, max_age_days):
+    """Drop expired and surplus entries."""
+    report = prune_cache(
+        cache_dir or default_cache_dir(),
+        max_entries=max_entries,
+        max_age_days=max_age_days,
+    )
+
+    if not report.removed:
+        rprint(f"[green]Nothing to prune ({report.entries_after:,} entries).[/green]")
+        return
+
+    rprint(
+        f"[green]Removed {report.removed:,} entries "
+        f"({report.expired:,} expired, {report.evicted:,} least recently used). "
+        f"{report.entries_after:,} remain.[/green]"
+    )
+
+
+@cache.command("clear")
+@click.option(
+    "--cache-dir",
+    default=None,
+    type=click.Path(),
+    help="Cache directory to clear. Defaults to ./.repo2readme/cache.",
+)
+@click.option(
+    "--remove-directory",
+    is_flag=True,
+    default=False,
+    help="Delete the cache directory itself, not just its entries.",
+)
+@click.option("--force", "-f", is_flag=True, help="Do not ask for confirmation.")
+def cache_clear_command(cache_dir, remove_directory, force):
+    """Delete every cached summary."""
+    resolved = cache_dir or default_cache_dir()
+    summary = cache_info(resolved)
+
+    if not summary.exists:
+        rprint(f"[yellow]No cache at {resolved}[/yellow]")
+        return
+
+    if not force and not click.confirm(
+        f"Delete {summary.entries:,} cached summaries in {resolved}?",
+        default=False,
+    ):
+        rprint("[yellow]Cache was left alone.[/yellow]")
+        return
+
+    removed = clear_cache(resolved, remove_directory=remove_directory)
+    rprint(f"[green]Removed {removed:,} cached summaries.[/green]")
 
 
 @main.command()

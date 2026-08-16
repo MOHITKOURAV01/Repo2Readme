@@ -22,6 +22,8 @@ repo2readme run [OPTIONS]
 | `--include <PATTERN>` | | Glob pattern for files to include, even if normally filtered out. Can be passed multiple times. |
 | `--exclude <PATTERN>` | | Glob pattern for files to exclude. Can be passed multiple times. |
 | `--max-file-size-kb <N>` | | Skip files larger than N KB. |
+| `--cache-max-entries <N>` | | Keep at most N cached summaries, dropping the least recently used. Default 5000. |
+| `--cache-max-age-days <N>` | | Drop cached summaries older than N days. Default 90. |
 | `--provider <NAME>` | | LLM provider to use. See `repo2readme providers`. |
 | `--model <NAME>` | | Model name. Defaults to the selected provider's default model. |
 | `--base-url <URL>` | | Base URL override for OpenAI-compatible providers. |
@@ -160,6 +162,23 @@ google      gemini   gemini-2.5-flash         GOOGLE_API_KEY
 ...
 ollama      -        llama3                   not required
 ```
+
+## `repo2readme cache`
+
+Inspects and manages the summary cache. Every subcommand takes `--cache-dir`,
+defaulting to `./.repo2readme/cache`.
+
+```bash
+repo2readme cache info                        # what is cached, and for which repositories
+repo2readme cache prune                       # apply the size and age bounds now
+repo2readme cache prune --max-entries 1000    # or your own
+repo2readme cache clear --force               # delete every cached summary
+repo2readme cache clear --remove-directory    # and the directory itself
+```
+
+`repo2readme reset` clears saved API keys and nothing else; before this, the
+only way to drop the summary cache was to know where it lived and remove it by
+hand.
 
 ## `repo2readme reset`
 

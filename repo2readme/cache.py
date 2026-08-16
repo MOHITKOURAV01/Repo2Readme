@@ -4,17 +4,35 @@ import logging
 import os
 import tempfile
 import threading
+import time
+from collections import Counter
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = "1.0"
+# Sentinel for "the caller did not pass this", so that None can mean "no bound".
+_UNSET: Any = object()
+
+CACHE_SCHEMA_VERSION = "1.1"
+
+# Versions this one can read without discarding what is already on disk.
+MIGRATABLE_SCHEMA_VERSIONS = ("1.0",)
 
 # How often an autosaving cache writes, in updates. The default of 1 keeps the
 # durability guarantee a library caller gets today: every put() is on disk when
 # it returns. The CLI knows its own lifecycle and turns autosave off, flushing
 # once at the end, which is where the quadratic cost actually mattered.
 DEFAULT_AUTOSAVE_EVERY = 1
+
+# The cache had no bound of any kind: entries were only ever removed for files
+# that no longer exist in the repository being processed right now. Used across
+# a handful of repositories it grew to tens of megabytes, and the whole file is
+# parsed on the first lookup and rewritten on every flush.
+DEFAULT_MAX_ENTRIES = 5000
+DEFAULT_MAX_AGE_DAYS = 90
+
+SECONDS_PER_DAY = 86400
 
 # Expected fields for each cache entry
 EXPECTED_ENTRY_FIELDS = {
@@ -24,6 +42,58 @@ EXPECTED_ENTRY_FIELDS = {
     "summary",
     "mtime",
 }
+
+# Added in schema 1.1. Missing values are backfilled rather than rejected, so a
+# 1.0 cache is migrated instead of thrown away.
+OPTIONAL_ENTRY_FIELDS = {
+    "created_at",
+    "last_used_at",
+    "namespace",
+}
+
+
+@dataclass(frozen=True)
+class PruneReport:
+    """What a :meth:`SummaryCache.prune` call removed."""
+
+    expired: int
+    evicted: int
+    entries_before: int
+    entries_after: int
+
+    @property
+    def removed(self) -> int:
+        return self.entries_before - self.entries_after
+
+
+@dataclass(frozen=True)
+class CacheSummary:
+    """A description of the cache on disk, for ``repo2readme cache info``."""
+
+    cache_file: str
+    exists: bool
+    entries: int
+    size_bytes: int
+    schema_version: str
+    namespaces: dict = field(default_factory=dict)
+    oldest_created_at: float | None = None
+    newest_created_at: float | None = None
+
+    @property
+    def repositories(self) -> int:
+        return len(self.namespaces)
+
+
+def _created_at(entry: dict, default: float) -> float:
+    value = entry.get("created_at")
+    return value if isinstance(value, (int, float)) else default
+
+
+def _last_used_at(entry: dict, default: float) -> float:
+    value = entry.get("last_used_at")
+    if isinstance(value, (int, float)):
+        return value
+    return _created_at(entry, default)
 
 
 def _validate_cache_structure(data: Any) -> bool:
@@ -65,6 +135,33 @@ def _validate_cache_structure(data: Any) -> bool:
     return True
 
 
+def _migrate_entries(data: dict, now: float) -> bool:
+    """Backfill the fields schema 1.1 added. Returns True if anything changed.
+
+    Schema 1.0 entries carry no timestamps at all, which is why nothing could
+    expire. Rather than discard a cache that is otherwise perfectly usable,
+    give its entries the current time: they then age out from now on, which is
+    the conservative reading of "we do not know how old this is".
+    """
+    changed = False
+
+    for entry in data.get("entries", []):
+        if not isinstance(entry, dict):
+            continue
+        if "created_at" not in entry:
+            entry["created_at"] = now
+            changed = True
+        if "last_used_at" not in entry:
+            entry["last_used_at"] = entry.get("created_at", now)
+            changed = True
+
+    if data.get("schema_version") != CACHE_SCHEMA_VERSION:
+        data["schema_version"] = CACHE_SCHEMA_VERSION
+        changed = True
+
+    return changed
+
+
 class SummaryCache:
     """
     File-level summary cache with configuration-aware invalidation.
@@ -96,6 +193,9 @@ class SummaryCache:
         prompt_template_hash: str,
         autosave: bool = True,
         autosave_every: int = DEFAULT_AUTOSAVE_EVERY,
+        namespace: str | None = None,
+        max_entries: int | None = DEFAULT_MAX_ENTRIES,
+        max_age_days: float | None = DEFAULT_MAX_AGE_DAYS,
     ):
         self.cache_dir = cache_dir
         self.config = config
@@ -104,6 +204,12 @@ class SummaryCache:
         self.schema_version = CACHE_SCHEMA_VERSION
         self.autosave = autosave
         self.autosave_every = max(1, int(autosave_every))
+        # Which repository this instance is working on. Entries record it, so
+        # a second repository analysed from the same directory is no longer
+        # reported as "these files were deleted" and evicted.
+        self.namespace = namespace
+        self.max_entries = max_entries
+        self.max_age_days = max_age_days
         self._data: Optional[dict] = None
         # file_path -> the entry dict that also lives in self._data["entries"]
         self._index: dict[str, dict] = {}
@@ -118,6 +224,7 @@ class SummaryCache:
             "removals": 0,
             "invalidations": 0,
             "disk_writes": 0,
+            "evictions": 0,
         }
 
     # ------------------------------------------------------------------
@@ -216,6 +323,19 @@ class SummaryCache:
                 return
 
             self._data = data
+
+            # A 1.0 cache is upgraded in place rather than discarded: the only
+            # difference is bookkeeping the entries did not carry.
+            if data.get("schema_version") in MIGRATABLE_SCHEMA_VERSIONS:
+                logger.info(
+                    "Migrating cache from schema %s to %s",
+                    data.get("schema_version"),
+                    self.schema_version,
+                )
+                if _migrate_entries(data, time.time()):
+                    self._dirty = True
+                    self._pending_updates += 1
+
             self._reindex()
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"Cache file corrupted or unreadable, rebuilding: {e}")
@@ -347,6 +467,12 @@ class SummaryCache:
                 self._stats["misses"] += 1
                 return None
 
+            # Recording the read is what makes least-recently-used eviction
+            # possible; without it there was no way to tell a summary that is
+            # used on every run from one nobody has touched in months.
+            entry["last_used_at"] = time.time()
+            self._dirty = True
+
             self._stats["hits"] += 1
             return entry.get("summary")
 
@@ -359,15 +485,20 @@ class SummaryCache:
         with self._lock:
             self._load()
 
+            now = time.time()
+            existing = self._index.get(file_path)
+
             payload = {
                 "file_path": file_path,
                 "content_hash": self._compute_content_hash(content),
                 "language": language,
                 "summary": summary,
                 "mtime": mtime,
+                "created_at": (existing or {}).get("created_at", now),
+                "last_used_at": now,
+                "namespace": self.namespace,
             }
 
-            existing = self._index.get(file_path)
             if existing is None:
                 self._data["entries"].append(payload)
                 self._index[file_path] = payload
@@ -379,9 +510,27 @@ class SummaryCache:
             self._stats["updates"] += 1
             self._touch()
 
+    def _belongs_here(self, entry: dict) -> bool:
+        """Whether ``entry`` was written for the repository being processed.
+
+        An entry with no namespace predates the field and is treated as ours,
+        which keeps the old behaviour for a cache written by an older version.
+        """
+        if self.namespace is None:
+            return True
+        entry_namespace = entry.get("namespace")
+        return entry_namespace is None or entry_namespace == self.namespace
+
     def get_deleted_files(self, current_files: set) -> list:
         """
         Return cache entries for files that no longer exist in current_files.
+
+        Only entries belonging to this cache's namespace are considered. The
+        cache directory is the *current working directory*, not the repository,
+        so running the tool from one place against two repositories put both in
+        one file - and every entry from the other repository looked like a
+        deleted file and was evicted. Two repositories analysed from the same
+        directory used to erase each other's work on every run.
         """
         with self._lock:
             self._load()
@@ -389,6 +538,7 @@ class SummaryCache:
                 entry
                 for entry in self._data.get("entries", [])
                 if entry.get("file_path") not in current_files
+                and self._belongs_here(entry)
             ]
 
     def remove_entries(self, file_paths: list) -> None:
@@ -417,3 +567,118 @@ class SummaryCache:
             self._pending_updates += 1
             if self.autosave:
                 self._save()
+
+    # ------------------------------------------------------------------
+    # Bounds
+    # ------------------------------------------------------------------
+
+    def prune(
+        self,
+        max_entries: int | None = _UNSET,
+        max_age_days: float | None = _UNSET,
+        now: float | None = None,
+    ) -> PruneReport:
+        """
+        Drop expired and surplus entries.
+
+        Entries older than ``max_age_days`` (measured from when the summary was
+        generated) go first, then the least recently used are dropped until at
+        most ``max_entries`` remain. Passing ``None`` for either disables that
+        bound; omitting them uses the values this cache was built with.
+
+        The cache had no eviction at all: entries were removed only for files
+        missing from the repository being processed, or wiped wholesale when
+        the configuration changed. Nothing recorded when a summary was written,
+        so age-based expiry was not even expressible.
+        """
+        if max_entries is _UNSET:
+            max_entries = self.max_entries
+        if max_age_days is _UNSET:
+            max_age_days = self.max_age_days
+
+        now = time.time() if now is None else now
+
+        with self._lock:
+            self._load()
+            entries = self._data.get("entries", [])
+            before = len(entries)
+
+            kept = entries
+            expired = 0
+
+            if max_age_days is not None and max_age_days >= 0:
+                cutoff = now - (max_age_days * SECONDS_PER_DAY)
+                fresh = [e for e in kept if _created_at(e, now) >= cutoff]
+                expired = len(kept) - len(fresh)
+                kept = fresh
+
+            evicted = 0
+            if max_entries is not None and max_entries >= 0 and len(kept) > max_entries:
+                # Least recently used first, so what a daily run touches stays.
+                kept = sorted(kept, key=lambda e: _last_used_at(e, now), reverse=True)
+                evicted = len(kept) - max_entries
+                kept = kept[:max_entries]
+
+            removed = before - len(kept)
+            if not removed:
+                return PruneReport(0, 0, before, before)
+
+            self._data["entries"] = kept
+            self._reindex()
+            self._stats["evictions"] += removed
+            self._dirty = True
+            self._pending_updates += 1
+            if self.autosave:
+                self._save()
+
+            return PruneReport(
+                expired=expired,
+                evicted=evicted,
+                entries_before=before,
+                entries_after=len(kept),
+            )
+
+    def describe(self) -> CacheSummary:
+        """Counts, size and age of what is currently cached."""
+        with self._lock:
+            self._load()
+            entries = self._data.get("entries", [])
+
+            try:
+                size_bytes = os.path.getsize(self.cache_file)
+            except OSError:
+                size_bytes = 0
+
+            namespaces = Counter(
+                str(entry.get("namespace") or "(unknown)") for entry in entries
+            )
+            created = [
+                entry["created_at"]
+                for entry in entries
+                if isinstance(entry.get("created_at"), (int, float))
+            ]
+
+            return CacheSummary(
+                cache_file=self.cache_file,
+                exists=os.path.exists(self.cache_file),
+                entries=len(entries),
+                size_bytes=size_bytes,
+                schema_version=str(self._data.get("schema_version", "")),
+                namespaces=dict(namespaces),
+                oldest_created_at=min(created) if created else None,
+                newest_created_at=max(created) if created else None,
+            )
+
+    def clear(self) -> int:
+        """Drop every entry. Returns how many were removed."""
+        with self._lock:
+            self._load()
+            removed = len(self._data.get("entries", []))
+            self._data["entries"] = []
+            self._index = {}
+            self._stats["removals"] += removed
+            self._dirty = True
+            self._pending_updates += 1
+            if self.autosave:
+                self._save()
+            return removed

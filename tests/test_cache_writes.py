@@ -107,6 +107,21 @@ def test_context_manager_flushes_even_when_the_body_raises(tmp_path, config):
     assert len(_read_cache_file(cache)["entries"]) == 1
 
 
+def _without_timestamps(data):
+    """The cache file with its wall-clock fields removed.
+
+    Entries record when they were written and last used, so two caches built a
+    fraction of a second apart never match byte for byte. Everything batching
+    could plausibly affect is still compared.
+    """
+    stripped = dict(data)
+    stripped["entries"] = [
+        {k: v for k, v in entry.items() if k not in ("created_at", "last_used_at")}
+        for entry in data.get("entries", [])
+    ]
+    return stripped
+
+
 def test_batched_and_autosaved_caches_produce_identical_files(tmp_path, config):
     eager = _make_cache(tmp_path / "eager", config)
     batched = _make_cache(tmp_path / "batched", config, autosave=False)
@@ -116,7 +131,9 @@ def test_batched_and_autosaved_caches_produce_identical_files(tmp_path, config):
             cache.put(f"f{i}.py", f"content {i}", "python", _summary(f"f{i}.py"), 1.0)
     batched.flush()
 
-    assert _read_cache_file(eager) == _read_cache_file(batched)
+    assert _without_timestamps(_read_cache_file(eager)) == _without_timestamps(
+        _read_cache_file(batched)
+    )
 
 
 def test_batched_writes_survive_a_reload(tmp_path, config):

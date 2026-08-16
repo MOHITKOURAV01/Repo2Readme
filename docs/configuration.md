@@ -202,6 +202,18 @@ The cache is stored in:
 
 This directory is created automatically in the current working directory when you run `repo2readme run`.
 
+Note that this is the *working* directory, not the repository being analysed.
+Running the tool from one place against several repositories puts them all in
+one file. Each entry records which repository it belongs to, so they coexist
+without interfering: the deleted-file sweep only looks at entries from the
+repository currently being processed. Without that, two repositories analysed
+from the same directory evicted each other's entries on every run and neither
+ever got a cache hit.
+
+A repository is identified by its `--url`, or by the absolute path of its
+`--local` directory, so `--local .` and `--local /home/me/project` are the same
+repository.
+
 ### How caching works
 
 1. **First run (cache miss):** Each file is summarized via the LLM, and the result is stored in the cache along with a SHA-256 content hash, detected language, and the current summarization configuration (provider, model, prompt template hash).
@@ -211,6 +223,63 @@ This directory is created automatically in the current working directory when yo
 3. **Modified files:** If a file's content changes, its content hash no longer matches, so the summary is regenerated and the cache is updated.
 
 4. **Deleted files:** Cache entries for files that no longer exist are automatically cleaned up.
+
+### Bounds
+
+The cache used to grow without limit: entries were only removed for files
+missing from the repository being processed, and nothing recorded when a
+summary was written, so nothing could expire. After a few repositories the file
+reached tens of megabytes, and it is parsed in full on the first lookup and
+rewritten in full on every flush.
+
+Each entry now records when it was created and when it was last used, and two
+bounds are applied at the end of every run:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--cache-max-entries` | 5000 | Keep at most this many entries, dropping the least recently used |
+| `--cache-max-age-days` | 90 | Drop entries older than this |
+
+Pass a negative value to either to disable that bound.
+
+### Managing the cache
+
+```bash
+repo2readme cache info     # location, entry count, size, entries per repository
+repo2readme cache prune    # apply the bounds now
+repo2readme cache clear    # delete every cached summary
+```
+
+`cache info` reports:
+
+```
+Summary cache
+
+Location           : /home/me/work/.repo2readme/cache/summaries.json
+Schema version     : 1.1
+Entries            : 1,284
+Size on disk       : 8.4 MB
+Repositories       : 3
+Oldest entry       : 2026-05-02 11:20
+Newest entry       : 2026-08-16 09:07
+
+Entries per repository
+
+     812  /home/me/work/project-a
+     341  /home/me/work/project-b
+     131  https://github.com/acme/app.git
+```
+
+`cache prune` takes the same `--max-entries` / `--max-age-days` options as the
+run. `cache clear` asks for confirmation unless given `--force`, and
+`--remove-directory` deletes the cache directory itself rather than just
+emptying it. All three accept `--cache-dir` to work on a cache somewhere other
+than the current directory.
+
+Caches written by earlier versions (schema 1.0) are upgraded in place rather
+than discarded — the only difference is the bookkeeping their entries did not
+carry. Migrated entries are treated as written now, so they age out from that
+point rather than disappearing at once.
 
 ### Cache invalidation
 
