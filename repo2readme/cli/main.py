@@ -4,6 +4,7 @@ load_dotenv()
 import click
 from rich import print as rprint
 from rich.console import Console
+from rich.markup import escape
 from rich.progress import Progress
 from rich.table import Table
 from repo2readme.config import reset_api_keys
@@ -14,6 +15,7 @@ from repo2readme import __version__
 from repo2readme.utils.logging_config import logging_options
 from repo2readme.utils.tree import generate_tree_from_paths
 from repo2readme.cache import SummaryCache
+from repo2readme.loaders.clone import CloneError
 from repo2readme.loaders.repo_loader import RepoLoader
 from repo2readme.summarize.summary import get_prompt_template_hash
 from repo2readme.dependency_graph import build_dependency_graph
@@ -108,9 +110,12 @@ def main():
 @click.option(
     "--branch",
     "-b",
-    default="main",
-    show_default=True,
-    help="Branch to clone when using --url.",
+    default=None,
+    help=(
+        "Branch to clone when using --url. Defaults to the branch the remote "
+        "itself points HEAD at, so repositories on master, develop or trunk "
+        "work without this flag."
+    ),
 )
 def run(url, local, output, force, include_patterns, exclude_patterns, max_file_size_kb, dry_run, strict, respect_gitignore, max_workers, provider, model, base_url, branch):
     """ Use --url for GitHub repo url and --local for local repo
@@ -156,8 +161,15 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
             else:
                 files, root_path, loader_obj = loader.load()
                 skipped = []
+        except CloneError as e:
+            # Already a full, actionable message naming the URL and the branch;
+            # prefixing it with "Failed to load repository" would only repeat
+            # what it says. Escaped because git's output can contain brackets
+            # that Rich would otherwise read as markup.
+            rprint(f"[red]{escape(str(e))}[/red]")
+            return
         except Exception as e:
-            rprint(f"[red]Failed to load repository: {e}[/red]")
+            rprint(f"[red]Failed to load repository: {escape(str(e))}[/red]")
             return
         progress.update(task, advance=1)
 

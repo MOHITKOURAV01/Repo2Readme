@@ -49,15 +49,35 @@ schemes, rather than being read as a directory name.
 
 The repository is cloned shallowly (`--depth 1`) into a private temporary
 directory that is removed when the run finishes, so two runs against the same
-repository cannot interfere with each other.
+repository cannot interfere with each other. The directory is also removed when
+the clone itself fails, rather than being left behind in the system temporary
+directory.
 
 ### `--branch`
 
-Branch to clone when using `--url`. Defaults to `main`.
+Branch to clone when using `--url`. When it is not given, the repository's own
+default branch is used — the branch the remote points `HEAD` at, which is what
+a plain `git clone` checks out.
 
 ```bash
-repo2readme run --url https://github.com/user/repo --branch develop
+repo2readme run --url https://github.com/user/repo                    # default branch
+repo2readme run --url https://github.com/user/repo --branch develop   # a specific one
 ```
+
+The default used to be the literal string `main`, and it was passed to
+`git clone --branch` on every run. Any repository on `master`, `develop` or
+`trunk` failed with `Remote branch main not found in upstream origin` even
+though nothing was wrong with it.
+
+The default branch is read with `git ls-remote --symref <url> HEAD` before the
+clone. If the remote does not answer that question — an old git, an unusual
+transport — the clone runs without `--branch` and git picks the branch itself,
+so nothing is lost.
+
+Clone failures are reported by cause rather than as raw git output. A missing
+branch, a repository that does not exist, rejected credentials, an unreachable
+host and a full disk each get their own message and a suggested next step, with
+git's own stderr included at the end.
 
 ### `--max-workers`
 

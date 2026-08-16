@@ -1,5 +1,31 @@
 # Troubleshooting
 
+## The clone fails with "Remote branch main not found in upstream origin"
+
+That was the old behaviour: `--branch` defaulted to `main` and was always
+passed to `git clone`, so a repository on `master`, `develop` or `trunk` could
+not be cloned without spelling the branch out. The default branch is now read
+from the remote, so this should not happen unless you passed `--branch`
+yourself. To see the branches a repository actually has:
+
+```bash
+git ls-remote --heads https://github.com/user/repo
+```
+
+## "Failed to clone repository"
+
+The message names the likely cause. The common ones:
+
+| What the message says | What to do |
+| --- | --- |
+| The branch does not exist on the remote | Drop `--branch`, or use a name from `git ls-remote --heads <url>` |
+| The remote refused the credentials | Use a personal access token over HTTPS, or an SSH key the remote knows about |
+| The remote reports no such repository | Check the URL; a private repository also reports this when the credentials in use cannot see it |
+| The remote could not be reached | Check the network, the host name and any proxy settings |
+| git is not installed | Install git, or point at an already-cloned copy with `--local` |
+
+git's own stderr is printed under `git said:` at the end of the message.
+
 ## "Missing API key" or repeated key prompts
 
 Your keys may not be saved correctly. Try setting them as environment variables instead:

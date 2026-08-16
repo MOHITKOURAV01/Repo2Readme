@@ -12,6 +12,9 @@ class RepoLoader:
     http, or the same URL in capitals - to the local loader, where it failed
     with "Folder not found". ``classify_source`` makes the decision instead and
     accepts everything ``git clone`` does.
+
+    ``branch`` is ``None`` by default, which clones the remote's own default
+    branch rather than assuming it is called ``main``.
     """
 
     def __init__(
@@ -22,7 +25,7 @@ class RepoLoader:
         max_file_size_kb=200,
         respect_gitignore=False,
         max_workers=None,
-        branch="main",
+        branch=None,
     ):
         self.source = source
         self.include_patterns = include_patterns
