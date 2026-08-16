@@ -286,11 +286,9 @@ def _patch_pipeline(monkeypatch, readme=README):
         "generate_all_summaries",
         lambda **kwargs: ([{"file_path": "app.py", "description": "d"}], []),
     )
-    monkeypatch.setattr(
-        cli_main,
-        "generate_hierarchical_summaries",
-        lambda **kwargs: kwargs["file_summaries"],
-    )
+    # The roll-up is deliberately left real: a single summary is below its
+    # threshold, so it returns without calling anything, and these tests then
+    # do not depend on the shape of what it returns.
 
     called = {"pipeline": 0}
 
