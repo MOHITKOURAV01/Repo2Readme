@@ -212,6 +212,14 @@ This directory is created automatically in the current working directory when yo
 
 4. **Deleted files:** Cache entries for files that no longer exist are automatically cleaned up.
 
+### Directory summaries
+
+Directory roll-ups are cached alongside file summaries, under keys prefixed
+with `<dir>:`. A directory entry is keyed on the summaries it was built from
+rather than on any file's bytes, so it is reused exactly as long as nothing
+underneath it changed. Before this, the roll-up was recomputed in full on every
+run, even when every file summary was a cache hit.
+
 ### Cache invalidation
 
 The cache is automatically invalidated when any of the following change:

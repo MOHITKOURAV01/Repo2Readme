@@ -4,6 +4,7 @@ load_dotenv()
 import click
 from rich import print as rprint
 from rich.console import Console
+from rich.markup import escape
 from rich.progress import Progress
 from rich.table import Table
 from repo2readme.config import reset_api_keys
@@ -22,7 +23,8 @@ from repo2readme.providers import PROVIDERS, provider_choices_help
 # Import new services
 from repo2readme.services.environment import setup_api_keys
 from repo2readme.services.estimation import format_size, estimate_analysis_cost
-from repo2readme.services.summarization import generate_all_summaries, generate_hierarchical_summaries
+from repo2readme.services.summarization import generate_all_summaries
+from repo2readme.services.rollup import DEFAULT_ROLLUP_THRESHOLD, generate_hierarchical_summaries
 from repo2readme.services.orchestrator import run_pipeline
 from repo2readme.services.reporting import partition_summaries, render_report
 
@@ -91,6 +93,17 @@ def main():
     help="Number of parallel worker threads for file processing (default: 4, capped at file count)",
 )
 @click.option(
+    "--rollup-threshold",
+    default=DEFAULT_ROLLUP_THRESHOLD,
+    show_default=True,
+    type=int,
+    help=(
+        "Roll file summaries up into directory summaries when the repository "
+        "has more than this many files. Set it above the file count to skip "
+        "the roll-up entirely."
+    ),
+)
+@click.option(
     "--provider",
     default=None,
     help=f"LLM provider ({provider_choices_help()}). Run 'repo2readme providers' for details.",
@@ -112,7 +125,7 @@ def main():
     show_default=True,
     help="Branch to clone when using --url.",
 )
-def run(url, local, output, force, include_patterns, exclude_patterns, max_file_size_kb, dry_run, strict, respect_gitignore, max_workers, provider, model, base_url, branch):
+def run(url, local, output, force, include_patterns, exclude_patterns, max_file_size_kb, dry_run, strict, respect_gitignore, max_workers, rollup_threshold, provider, model, base_url, branch):
     """ Use --url for GitHub repo url and --local for local repo
     """
     if not url and not local:
@@ -260,17 +273,39 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
 
         with Progress() as progress:
             rollup_task = progress.add_task("[cyan]Generating directory summaries...[/cyan]", total=1)
-            hierarchical_summaries = generate_hierarchical_summaries(
+            rollup = generate_hierarchical_summaries(
                 file_summaries=successful_summaries,
                 provider=provider,
                 model=model,
                 base_url=base_url,
+                max_workers=max_workers,
+                summary_cache=summary_cache,
+                threshold=rollup_threshold,
                 progress=progress,
                 task_id=rollup_task
             )
 
-        # Remove cache entries for files that no longer exist
+        hierarchical_summaries = rollup.summaries
+
+        # A directory whose roll-up failed is reported like a failed file
+        # rather than handed to the README prompt as an error placeholder. The
+        # summaries it was built from are still used, so nothing is lost.
+        if rollup.failures:
+            failures.extend(rollup.failures)
+            rprint(
+                f"\n[yellow]{len(rollup.failures)} director"
+                f"{'y' if len(rollup.failures) == 1 else 'ies'} could not be "
+                "summarized; the file summaries underneath were used "
+                "instead.[/yellow]"
+            )
+            for failure in rollup.failures:
+                rprint(f"    - {escape(failure.file_path)}: {escape(failure.short_reason())}")
+
+        # Remove cache entries for files that no longer exist. The directory
+        # summaries this run just wrote are live too, so they are held out of
+        # the sweep - otherwise every run would delete the roll-up it cached.
         current_files = {doc["metadata"]["file_path"] for doc in documents}
+        current_files |= rollup.cache_keys
         stale_entries = summary_cache.get_deleted_files(current_files)
         if stale_entries:
             stale_paths = [e["file_path"] for e in stale_entries]

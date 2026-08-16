@@ -2,6 +2,8 @@ import importlib
 
 from click.testing import CliRunner
 
+from repo2readme.services.rollup import RollupResult
+
 
 cli_main = importlib.import_module("repo2readme.cli.main")
 
@@ -23,8 +25,8 @@ def test_output_file_is_not_overwritten_when_user_declines(monkeypatch, tmp_path
     def fake_generate_all_summaries(documents, summary_cache, **kwargs):
         return [{"file_path": "main.py", "description": "entry point"}], []
 
-    def fake_generate_hierarchical_summaries(file_summaries, provider, model, base_url, progress, task_id):
-        return file_summaries
+    def fake_generate_hierarchical_summaries(file_summaries, **kwargs):
+        return RollupResult(summaries=file_summaries)
 
     def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
         return "new generated content"
@@ -64,8 +66,8 @@ def test_output_file_is_overwritten_when_user_confirms(monkeypatch, tmp_path):
     def fake_generate_all_summaries(documents, summary_cache, **kwargs):
         return [{"file_path": "main.py", "description": "entry point"}], []
 
-    def fake_generate_hierarchical_summaries(file_summaries, provider, model, base_url, progress, task_id):
-        return file_summaries
+    def fake_generate_hierarchical_summaries(file_summaries, **kwargs):
+        return RollupResult(summaries=file_summaries)
 
     def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
         return "new generated content"
@@ -105,8 +107,8 @@ def test_output_file_is_overwritten_with_force(monkeypatch, tmp_path):
     def fake_generate_all_summaries(documents, summary_cache, **kwargs):
         return [{"file_path": "main.py", "description": "entry point"}], []
 
-    def fake_generate_hierarchical_summaries(file_summaries, provider, model, base_url, progress, task_id):
-        return file_summaries
+    def fake_generate_hierarchical_summaries(file_summaries, **kwargs):
+        return RollupResult(summaries=file_summaries)
 
     def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
         return "new generated content"

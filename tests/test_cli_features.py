@@ -1,6 +1,8 @@
 import importlib
 import os
 from click.testing import CliRunner
+
+from repo2readme.services.rollup import RollupResult
 import pytest
 
 cli_main = importlib.import_module("repo2readme.cli.main")
@@ -145,8 +147,8 @@ def test_normal_run_user_confirms(monkeypatch, tmp_path):
         summarize_called = True
         return [{"file_path": "main.py", "description": "fake summary"}], []
 
-    def fake_generate_hierarchical_summaries(file_summaries, provider, model, base_url, progress, task_id):
-        return file_summaries
+    def fake_generate_hierarchical_summaries(file_summaries, **kwargs):
+        return RollupResult(summaries=file_summaries)
 
     def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
         nonlocal workflow_called
@@ -195,8 +197,8 @@ def test_normal_run_force_bypasses_confirmation(monkeypatch, tmp_path):
         summarize_called = True
         return [{"file_path": "main.py", "description": "fake summary"}], []
 
-    def fake_generate_hierarchical_summaries(file_summaries, provider, model, base_url, progress, task_id):
-        return file_summaries
+    def fake_generate_hierarchical_summaries(file_summaries, **kwargs):
+        return RollupResult(summaries=file_summaries)
 
     def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
         nonlocal workflow_called

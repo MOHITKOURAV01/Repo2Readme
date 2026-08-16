@@ -22,6 +22,7 @@ repo2readme run [OPTIONS]
 | `--include <PATTERN>` | | Glob pattern for files to include, even if normally filtered out. Can be passed multiple times. |
 | `--exclude <PATTERN>` | | Glob pattern for files to exclude. Can be passed multiple times. |
 | `--max-file-size-kb <N>` | | Skip files larger than N KB. |
+| `--rollup-threshold <N>` | | Roll file summaries up into directory summaries above this file count. Default 15. |
 | `--provider <NAME>` | | LLM provider to use. See `repo2readme providers`. |
 | `--model <NAME>` | | Model name. Defaults to the selected provider's default model. |
 | `--base-url <URL>` | | Base URL override for OpenAI-compatible providers. |
@@ -67,6 +68,31 @@ at the number of files. This applies to both `--local` and `--url` runs.
 ```bash
 repo2readme run --url https://github.com/user/repo --max-workers 8
 ```
+
+It bounds three stages: reading files during traversal, summarizing them, and
+summarizing directories. The directory roll-up used to ignore it and run one
+call at a time.
+
+### `--rollup-threshold`
+
+Above this many files, individual file summaries are rolled up into directory
+summaries before the README prompt is built, so a large repository does not
+send hundreds of file summaries to the model at once. Defaults to 15.
+
+```bash
+repo2readme run --local . --rollup-threshold 40    # roll up later
+repo2readme run --local . --rollup-threshold 99999 # never roll up
+```
+
+Directories at the same depth are summarized concurrently, and the results are
+cached: an incremental run where nothing changed under a directory reuses its
+summary instead of paying for it again. The cached entry is keyed on the
+summaries the directory was built from, so changing one file invalidates that
+file's directory and nothing else.
+
+A directory whose roll-up fails is reported after the run and the file
+summaries underneath it are used instead. The failure placeholder is never
+handed to the README prompt.
 
 ### `--respect-gitignore`
 
