@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Optional
 
 
@@ -183,10 +184,33 @@ class DependencyGraph:
 # Lightweight import parsers
 # ---------------------------------------------------------------------------
 
+def _package_roots(files_map: dict[str, str]) -> tuple[str, ...]:
+    """
+    Every directory prefix appearing in ``files_map``, sorted.
+
+    Used as candidate roots for absolute package imports. Computed once per
+    graph build and passed down: derived per import, it re-walked every path in
+    the repository for every import statement in every file.
+
+    The prefixes are built by walking up from each file's directory. Building
+    them by prepending a separator to each path segment produced "//repo" for
+    the leading empty segment of an absolute path, so no candidate ever matched
+    and this fallback never resolved anything.
+    """
+    roots: set[str] = set()
+    for path in files_map:
+        directory = path.rpartition("/")[0]
+        while directory and directory not in roots:
+            roots.add(directory)
+            directory = directory.rpartition("/")[0]
+    return tuple(sorted(roots))
+
+
 def _resolve_python_import(
     source_file: str,
     import_path: str,
     files_map: dict[str, str],
+    package_roots: tuple[str, ...] | None = None,
 ) -> Optional[str]:
     """
     Attempt to resolve a Python import to an actual file path.
@@ -195,6 +219,8 @@ def _resolve_python_import(
         source_file: Absolute path of the file containing the import
         import_path: The module path being imported (e.g., "os", "utils.helpers")
         files_map: Mapping from normalized file paths to absolute paths
+        package_roots: Precomputed directory prefixes from ``files_map``.
+            Derived on demand when omitted.
 
     Returns:
         Resolved absolute file path, or None if not found
@@ -223,14 +249,13 @@ def _resolve_python_import(
         for _ in range(max(0, dots - 1)):
             base_dir = base_dir.rsplit("/", 1)[0] if "/" in base_dir else ""
 
-        # For sibling imports like "from . import helper", module_path is empty
-        # Search for the module directly in base_dir
+        # "from . import x" carries no module after the dots. The names being
+        # imported are turned into their own module paths by
+        # _parse_python_imports (". " + "x" -> ".x"), so what is left to resolve
+        # here is the package itself, which importing from it does execute.
         if not module_path:
-            # Look for helper.py or helper/__init__.py in base_dir
-            for candidate in [f"{base_dir}/helper.py", f"{base_dir}/helper/__init__.py"]:
-                if candidate in files_map:
-                    return candidate
-            return None
+            candidate = f"{base_dir}/__init__.py"
+            return candidate if candidate in files_map else None
 
         # Try relative to the computed base_dir
         for candidate in [
@@ -252,15 +277,10 @@ def _resolve_python_import(
             return candidate
 
     # Then try candidate package roots from files_map
-    package_roots: set[str] = set()
-    for path in files_map:
-        parts = path.split("/")
-        prefix = ""
-        for part in parts[:-1]:
-            prefix = f"{prefix}/{part}" if prefix else f"/{part}"
-            package_roots.add(prefix)
+    if package_roots is None:
+        package_roots = _package_roots(files_map)
 
-    for root in sorted(package_roots):
+    for root in package_roots:
         for candidate in [
             f"{root}/{module_path.replace('.', '/')}/__init__.py",
             f"{root}/{module_path.replace('.', '/')}.py",
@@ -347,13 +367,53 @@ def _normalize_js_path(path: str) -> str:
     return "/".join(out)
 
 
+# from <module> import <names>, where <names> may be a parenthesized list
+# spanning several lines.
+_FROM_IMPORT = re.compile(
+    r'^[ \t]*from[ \t]+([^\s]+)[ \t]+import[ \t]*(\([^)]*\)|[^\n#]+)',
+    re.MULTILINE,
+)
+
+
+def _imported_names(raw: str) -> list[str]:
+    """
+    Names from the right-hand side of a ``from ... import ...`` statement.
+
+    Aliases, comments, wildcards and the parentheses of a multi-line list are
+    dropped, so ``(helper,  # noqa\\n config as cfg)`` yields
+    ``["helper", "config"]``.
+    """
+    cleaned = raw.strip().removeprefix("(").rstrip(")")
+
+    names: list[str] = []
+    for part in cleaned.split(","):
+        part = re.sub(r'#.*$', '', part, flags=re.MULTILINE).strip()
+        if not part:
+            continue
+        name = part.split()[0]  # drop "as alias"
+        if name == "*" or not re.fullmatch(r'\w+', name):
+            continue
+        names.append(name)
+    return names
+
+
+def _append_unique(target: list[str], value: str) -> None:
+    if value and value not in target:
+        target.append(value)
+
+
 def _parse_python_imports(content: str) -> list[str]:
     """
     Extract Python import paths from file content.
 
     Returns list of imported module paths.
+
+    For ``from <module> import <names>`` the imported names are emitted as
+    module paths of their own, alongside the module itself. Any of those names
+    can be a submodule - ``from . import routes`` is the usual way to import a
+    sibling - and the module path alone does not say which file that is.
     """
-    imports = []
+    imports: list[str] = []
 
     # Match: import module [as alias] [, module ...]
     for match in re.finditer(r'^\s*import\s+([^\n#]+)', content, re.MULTILINE):
@@ -362,14 +422,43 @@ def _parse_python_imports(content: str) -> list[str]:
         line = re.sub(r'#.*$', '', line).strip()
         # Split on commas, handle 'as' aliases
         parts = [p.strip().split()[0] for p in line.split(',') if p.strip()]
-        imports.extend(parts)
+        for part in parts:
+            _append_unique(imports, part)
 
     # Match: from module import name [as alias] [, name ...]
-    for match in re.finditer(r'^\s*from\s+([^\s]+)\s+import\s+([^\n#]+)', content, re.MULTILINE):
+    for match in _FROM_IMPORT.finditer(content):
         module_path = match.group(1).strip()
-        imports.append(module_path)
+        _append_unique(imports, module_path)
+
+        # "." and ".." already end in the separator; "pkg" and ".pkg" need one.
+        prefix = module_path if module_path.endswith(".") else f"{module_path}."
+        for name in _imported_names(match.group(2)):
+            _append_unique(imports, f"{prefix}{name}")
 
     return imports
+
+
+# import X from 'module', including a binding list spread over several lines.
+# [^;]*? keeps the match inside one statement.
+_JS_IMPORT_FROM = re.compile(
+    r'import\s+[^;]*?from\s+["\']([^"\']+)["\']', re.DOTALL
+)
+
+# import 'module' - no bindings, imported for its side effects (polyfills,
+# stylesheets, registrations).
+_JS_SIDE_EFFECT_IMPORT = re.compile(
+    r'^[ \t]*import\s+["\']([^"\']+)["\']', re.MULTILINE
+)
+
+# export { x } from 'module' / export * from 'module' - the barrel-file pattern,
+# which is a dependency in the same way an import is.
+_JS_EXPORT_FROM = re.compile(
+    r'export\s+[^;]*?from\s+["\']([^"\']+)["\']', re.DOTALL
+)
+
+_JS_DYNAMIC_IMPORT = re.compile(r'import\s*\(\s*["\']([^"\']+)["\']\s*\)')
+
+_JS_REQUIRE = re.compile(r'require\s*\(\s*["\']([^"\']+)["\']\s*\)')
 
 
 def _parse_js_imports(content: str) -> list[str]:
@@ -378,23 +467,17 @@ def _parse_js_imports(content: str) -> list[str]:
 
     Returns list of imported module paths.
     """
-    imports = []
+    imports: list[str] = []
 
-    # Match: import X from 'module'
-    for match in re.finditer(r'import\s+.*?from\s+["\']([^"\']+)["\']', content):
-        imports.append(match.group(1).strip())
-
-    # Match: import('module') for dynamic imports
-    for match in re.finditer(r'import\s*\(\s*["\']([^"\']+)["\']\s*\)', content):
-        path = match.group(1).strip()
-        if path not in imports:
-            imports.append(path)
-
-    # Match: require('module')
-    for match in re.finditer(r'require\s*\(\s*["\']([^"\']+)["\']\s*\)', content):
-        path = match.group(1).strip()
-        if path not in imports:
-            imports.append(path)
+    for pattern in (
+        _JS_IMPORT_FROM,
+        _JS_SIDE_EFFECT_IMPORT,
+        _JS_EXPORT_FROM,
+        _JS_DYNAMIC_IMPORT,
+        _JS_REQUIRE,
+    ):
+        for match in pattern.finditer(content):
+            _append_unique(imports, match.group(1).strip())
 
     return imports
 
@@ -427,6 +510,10 @@ def build_dependency_graph(documents: list[dict]) -> DependencyGraph:
             normalized = file_path.replace("\\", "/")
             files_map[normalized] = file_path
 
+    # Candidate roots for absolute package imports, walked once for the whole
+    # graph rather than once per import statement.
+    package_roots = _package_roots(files_map)
+
     # Process each file
     for doc in documents:
         metadata = doc.get("metadata", {})
@@ -444,7 +531,7 @@ def build_dependency_graph(documents: list[dict]) -> DependencyGraph:
             # Register source node so isolated Python files are tracked
             graph.nodes.add(source_file)
             imports = _parse_python_imports(content)
-            resolver = _resolve_python_import
+            resolver = partial(_resolve_python_import, package_roots=package_roots)
         elif language in ("javascript", "typescript"):
             # Register source node so isolated JS/TS files are tracked
             graph.nodes.add(source_file)
