@@ -25,6 +25,20 @@ from repo2readme.services.estimation import format_size, estimate_analysis_cost
 from repo2readme.services.summarization import generate_all_summaries, generate_hierarchical_summaries
 from repo2readme.services.orchestrator import run_pipeline
 from repo2readme.services.reporting import partition_summaries, render_report
+from repo2readme.utils.workers import validate_max_workers
+
+
+def validate_max_workers_option(ctx, param, value):
+    """Reject an unusable --max-workers before the repository is loaded.
+
+    Without this the value travelled all the way to ThreadPoolExecutor, which
+    raised part way through the summarization progress bar - after the clone,
+    the traversal and the user's confirmation of the token estimate.
+    """
+    try:
+        return validate_max_workers(value)
+    except ValueError as e:
+        raise click.BadParameter(str(e), ctx=ctx, param=param) from e
 
 
 @click.group()
@@ -88,6 +102,7 @@ def main():
     "--max-workers",
     default=None,
     type=int,
+    callback=validate_max_workers_option,
     help="Number of parallel worker threads for file processing (default: 4, capped at file count)",
 )
 @click.option(

@@ -13,6 +13,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Iterable, Optional
 
+from repo2readme.utils.workers import resolve_worker_count
+
 from .stages import (
     PipelineContext,
     FilteredFile,
@@ -334,8 +336,11 @@ class TraversalPipeline:
                 self._errors.append(f"Progress callback error: {exc}")
 
     def _resolve_worker_count(self, total_files: int) -> int:
-        """Determine the number of worker threads to use."""
-        if self.max_workers is not None:
-            return max(1, self.max_workers)
-        # Default: use up to 4 workers, but no more than the file count
-        return min(4, max(1, total_files))
+        """Determine the number of worker threads to use.
+
+        Delegates to :func:`repo2readme.utils.workers.resolve_worker_count` so
+        the flag means the same thing here and in the summarization stage. An
+        explicit request used to skip the file-count cap here, so
+        ``--max-workers 64`` started 64 threads for a two-file repository.
+        """
+        return resolve_worker_count(self.max_workers, total_files)
