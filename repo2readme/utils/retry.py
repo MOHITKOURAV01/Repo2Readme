@@ -7,6 +7,10 @@ dependency-free retry with exponential backoff and jitter.
 The important part is the classification: rate limits, timeouts and transient
 server errors are worth retrying, while a bad API key or an unsupported
 provider is not - retrying those only makes the failure slower.
+
+A response the output parser could not read is also worth retrying. The chains
+sample the model, so the next attempt produces different text, and a truncated
+object or a stray code fence usually parses on the second ask.
 """
 
 from __future__ import annotations
@@ -65,6 +69,20 @@ NON_RETRYABLE_MESSAGE_PATTERNS = (
     "maximum context",
     "model not found",
     "does not exist",
+)
+
+# Exception classes raised when the model's answer could not be parsed. Matched
+# against every class name in the exception's MRO rather than just its own name:
+# the provider integrations subclass these with names of their own, and
+# LangChain's OutputParserException is itself a ValueError, which the
+# programming-error rejection below would otherwise swallow.
+PARSER_EXCEPTION_MARKERS = (
+    "outputparserexception",
+    "outputparsererror",
+    "parsererror",
+    "parseexception",
+    "validationerror",
+    "jsondecodeerror",
 )
 
 _STATUS_IN_MESSAGE = re.compile(r"\berror code:\s*(\d{3})\b", re.IGNORECASE)
@@ -151,8 +169,33 @@ def status_code_of(exc: BaseException) -> int | None:
     return None
 
 
+def exception_class_names(exc: BaseException) -> tuple[str, ...]:
+    """Lowercased names of ``exc``'s class and every class it inherits from."""
+    return tuple(cls.__name__.lower() for cls in type(exc).__mro__)
+
+
+def is_parse_error(exc: BaseException) -> bool:
+    """Whether ``exc`` means the model's answer could not be parsed.
+
+    Covers the parser exceptions raised by the JSON and Pydantic parsers on the
+    summarization and review chains, including provider-specific subclasses.
+    """
+    names = exception_class_names(exc)
+    return any(
+        marker in name for name in names for marker in PARSER_EXCEPTION_MARKERS
+    )
+
+
 def is_retryable(exc: BaseException) -> bool:
     """Whether another attempt could plausibly succeed."""
+    # Checked before the programming-error rejection below, because
+    # OutputParserException subclasses ValueError and would never reach a later
+    # branch. The message is not consulted either: it embeds the model's own
+    # output, so scanning it for phrases like "authentication" reads the answer
+    # as if it were an error report.
+    if is_parse_error(exc):
+        return True
+
     # Programming and configuration errors: never worth a retry.
     if isinstance(exc, (TypeError, KeyError, AttributeError, ImportError,
                         NotImplementedError, ValueError)):
@@ -172,10 +215,6 @@ def is_retryable(exc: BaseException) -> bool:
 
     if any(pattern in message for pattern in NON_RETRYABLE_MESSAGE_PATTERNS):
         return False
-
-    # A malformed JSON response usually parses fine on a re-ask.
-    if "outputparser" in type(exc).__name__.lower():
-        return True
 
     return any(pattern in message for pattern in RETRYABLE_MESSAGE_PATTERNS)
 
