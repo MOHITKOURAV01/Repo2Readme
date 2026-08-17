@@ -1,6 +1,6 @@
 import logging
 import operator
-from typing import Annotated, List, TypedDict
+from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -16,7 +16,7 @@ UNREVIEWED_SCORE = 0.0
 
 
 class ReadmeState(TypedDict):
-    summaries: List[str]
+    summaries: list[str]
     tree_structure: str
     readme: Annotated[list[str], operator.add]
     score: Annotated[list[float], operator.add]
@@ -103,11 +103,21 @@ def readme_reviewer_node(state: ReadmeState):
     return {
         'score': [review.score],
         'feedback': [review.feedback],
-        'review_errors': [],
+        # One entry per iteration, empty when the review came back, so the
+        # latest entry always describes the latest review. Returning [] here
+        # would add nothing to an accumulating channel, leaving an older
+        # failure looking like the current one.
+        'review_errors': [''],
         'iteration_no': state['iteration_no'] + 1,
         'best_score': best_score,
         'best_readme': best_readme,
     }
+
+
+def latest_review_error(state: ReadmeState) -> str:
+    """Why the most recent review failed, or ``""`` if it came back."""
+    errors = state.get('review_errors') or ['']
+    return errors[-1]
 
 
 def readme_condition(state: ReadmeState):
@@ -116,8 +126,10 @@ def readme_condition(state: ReadmeState):
     iteration = state['iteration_no']
 
     # Without a review there is no feedback to improve on, so another round
-    # would just re-ask the same question and spend another call.
-    if state.get('review_errors'):
+    # would just re-ask the same question and spend another call. Only the
+    # latest review counts: an earlier failure must not end a run whose most
+    # recent review succeeded.
+    if latest_review_error(state):
         return END
 
     if score >= 8.5 or iteration >= max_iterations:

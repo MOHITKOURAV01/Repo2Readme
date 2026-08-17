@@ -55,8 +55,10 @@ def run_pipeline(
 
     final_state = workflow.invoke(initial_state)
 
+    # Empty entries mark the iterations whose review came back normally.
     for error in final_state.get("review_errors") or []:
-        logger.warning("README review did not complete: %s", error)
+        if error:
+            logger.warning("README review did not complete: %s", error)
 
     readme, issues = postprocess_readme(select_readme(final_state))
 
