@@ -154,6 +154,12 @@ class TestSummarizationStage:
 
 
 class TestCliValidation:
+    @pytest.fixture(autouse=True)
+    def _isolated_cwd(self, tmp_path, monkeypatch):
+        # run() resolves its cache directory from the working directory, so keep
+        # anything it creates out of the checkout.
+        monkeypatch.chdir(tmp_path)
+
     def _invoke(self, tmp_path, value):
         source = tmp_path / "repo"
         source.mkdir()
