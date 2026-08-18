@@ -23,7 +23,7 @@ from repo2readme.providers import PROVIDERS, provider_choices_help
 from repo2readme.services.environment import setup_api_keys
 from repo2readme.services.estimation import format_size, estimate_analysis_cost
 from repo2readme.services.summarization import generate_all_summaries, generate_hierarchical_summaries
-from repo2readme.services.orchestrator import run_pipeline
+from repo2readme.services.orchestrator import ReadmeGenerationError, run_pipeline
 from repo2readme.services.reporting import partition_summaries, render_report
 
 
@@ -278,14 +278,24 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
 
         rprint("[cyan]Generating README...[/cyan]")
         
-        readme = run_pipeline(
-            summaries=hierarchical_summaries,
-            tree=tree,
-            dependency_overview=dependency_overview,
-            provider=provider,
-            model=model,
-            base_url=base_url
-        )
+        try:
+            readme = run_pipeline(
+                summaries=hierarchical_summaries,
+                tree=tree,
+                dependency_overview=dependency_overview,
+                provider=provider,
+                model=model,
+                base_url=base_url
+            )
+        except ReadmeGenerationError as e:
+            # Nothing is written: an empty README would replace the user's
+            # existing file with zero bytes.
+            rprint(f"\n[red]{e}[/red]")
+            rprint(
+                "[yellow]Nothing was written. Re-run to try again, or use "
+                "-v to see the reviewer's diagnostics.[/yellow]"
+            )
+            raise SystemExit(1) from e
 
         if output is None:
             rprint("\n[green]Generated README:[/green]\n")
