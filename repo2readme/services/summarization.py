@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any
 
 from repo2readme.utils.detect_language import detect_lang
+from repo2readme.utils.workers import resolve_worker_count
 from repo2readme.summarize.summary import summarize_file
 from repo2readme.cache import SummaryCache
 from repo2readme.services.reporting import SummaryFailure
@@ -71,8 +72,8 @@ def generate_all_summaries(
                 errors.append(SummaryFailure(file_path=file_path, reason=str(e)))
 
 
-    effective_workers = min(max_workers or 4, total_documents)
-    
+    effective_workers = resolve_worker_count(max_workers, total_documents)
+
     with ThreadPoolExecutor(max_workers=effective_workers) as executor:
         futures = {executor.submit(process_document, doc): doc for doc in documents}
         
