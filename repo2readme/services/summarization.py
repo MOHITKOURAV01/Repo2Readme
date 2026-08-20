@@ -8,6 +8,35 @@ from repo2readme.summarize.summary import summarize_file
 from repo2readme.cache import SummaryCache
 from repo2readme.services.reporting import SummaryFailure
 
+def resolve_language(metadata: Dict[str, Any], content: str) -> str:
+    """The language of a document, preferring what the traversal already found.
+
+    The traversal pipeline detects the language from the full path *and* the
+    content, so it can use every strategy ``detect_lang`` implements - the
+    extension, the filename, a shebang, then content markers. That answer used
+    to be dropped before it reached here, and this stage re-detected it from
+    ``file_type``, which is the bare extension and empty for any file without
+    one. A ``Gemfile`` came out as ``unknown`` and a ``Jenkinsfile`` as
+    ``json``, and the wrong answer went into the summarizer prompt and the
+    cache key.
+
+    The fallback is kept for callers that build documents by hand, and is given
+    the best path it can find rather than the extension alone.
+    """
+    language = metadata.get("language")
+    if language and language != "unknown":
+        return language
+
+    path = (
+        metadata.get("relative_path")
+        or metadata.get("file_path")
+        or metadata.get("file_name")
+        or metadata.get("file_type")
+        or "text"
+    )
+    return detect_lang(path, content)
+
+
 def generate_all_summaries(
     documents: List[Dict[str, Any]],
     summary_cache: SummaryCache,
@@ -40,7 +69,7 @@ def generate_all_summaries(
         meta = doc["metadata"]
         file_path = meta["file_path"]
         try:
-            lang = detect_lang(meta.get("file_type", "text"), doc["content"])
+            lang = resolve_language(meta, doc["content"])
             cached = summary_cache.get(file_path, doc["content"], lang)
             if cached is not None:
                 with summaries_lock:
@@ -66,7 +95,9 @@ def generate_all_summaries(
                 summaries.append(summary)
             # Only cache successful summaries; failed ones will be retried
             if not isinstance(summary, dict) or "error" not in summary:
-                summary_cache.put(file_path, doc["content"], lang, summary, meta.get("mtime", 0))
+                summary_cache.put(
+                    file_path, doc["content"], lang, summary, meta.get("mtime", 0)
+                )
         except Exception as e:
             with errors_lock:
                 errors.append(SummaryFailure(file_path=file_path, reason=str(e)))

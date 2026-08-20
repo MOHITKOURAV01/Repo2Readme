@@ -237,6 +237,7 @@ class TraversalPipeline:
                 file_name=metadata.file_name,
                 file_type=metadata.file_type,
                 file_size=metadata.file_size,
+                mtime=metadata.mtime,
                 language=language,
             )
 
