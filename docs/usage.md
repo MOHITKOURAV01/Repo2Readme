@@ -66,6 +66,34 @@ visible, never silent:
 └── ... (37 more)
 ```
 
+## The Dependency Overview
+
+For Python, JavaScript and TypeScript files, imports are resolved into a graph
+and a short summary of it is handed to the model along with the file summaries:
+
+```markdown
+### Core Modules
+Files most depended on by other modules:
+- `auth/index.ts` (2 incoming dependencies)
+- `billing/index.ts` (2 incoming dependencies)
+
+### Entry Points
+Files that import others but are not imported themselves:
+- `auth/routes.ts`
+```
+
+Two things about how it reads:
+
+- **Names are disambiguated, not truncated.** A file whose basename is unique
+  among the listed files renders as just that basename; one that collides grows
+  by as many leading directories as it takes to be unique.
+- **Entry points import something.** A file that imports nothing and is
+  imported by nothing is *isolated*, and is counted separately in the
+  statistics. The two buckets never overlap.
+
+The block is stable: the same repository produces the same overview on every
+run, so a regenerated README differs only where the repository actually did.
+
 ## Filtering files
 
 By default, common non-essential files (`.git`, `node_modules`, lock files, images, archives, etc.) are skipped. You can adjust this with `--include` / `--exclude` / `--max-file-size-kb` — see [Configuration](./configuration.md) and the [CLI Reference](./cli-reference.md).

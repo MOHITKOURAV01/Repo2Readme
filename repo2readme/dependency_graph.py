@@ -12,7 +12,8 @@ unsupported languages, and malformed files.
 from __future__ import annotations
 
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -20,6 +21,62 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
+
+# How many entry points the rendered section lists before collapsing the rest
+# into a "... and N more" line.
+MAX_LISTED_ENTRY_POINTS = 10
+
+
+def path_suffixes(path: str) -> list[str]:
+    """Every trailing slice of ``path``, shortest first.
+
+    ``"a/b/c.py"`` yields ``["c.py", "b/c.py", "a/b/c.py"]``.
+    """
+    parts = [part for part in path.replace("\\", "/").split("/") if part]
+    if not parts:
+        return [path]
+    return ["/".join(parts[index:]) for index in range(len(parts) - 1, -1, -1)]
+
+
+def display_names(paths: Iterable[str]) -> dict[str, str]:
+    """Map each path to the shortest suffix that is unique among ``paths``.
+
+    Rendering the basename alone turned ``auth/index.ts``, ``billing/index.ts``
+    and ``search/index.ts`` into three identical bullets, which is worse than
+    useless in a section the model is asked to describe the architecture from.
+    A file whose basename is already unique still renders as just the basename.
+
+    Paths that stay ambiguous even at full length (the same path listed twice)
+    fall back to the full path, so the mapping is always total.
+    """
+    unique_paths = list(dict.fromkeys(paths))
+    if not unique_paths:
+        return {}
+
+    candidates = {path: path_suffixes(path) for path in unique_paths}
+    depth = max(len(suffixes) for suffixes in candidates.values())
+
+    names: dict[str, str] = {}
+    remaining = set(unique_paths)
+
+    for level in range(depth):
+        proposed = {
+            path: candidates[path][min(level, len(candidates[path]) - 1)]
+            for path in remaining
+        }
+        counts = Counter(proposed.values())
+        for path, name in proposed.items():
+            if counts[name] == 1:
+                names[path] = name
+        remaining = {path for path in remaining if path not in names}
+        if not remaining:
+            break
+
+    for path in remaining:
+        names[path] = path
+
+    return names
+
 
 @dataclass
 class DependencyGraph:
@@ -63,11 +120,22 @@ class DependencyGraph:
 
     def get_entry_points(self) -> list[str]:
         """
-        Return files with no incoming dependencies (entry points).
+        Return files that nothing imports but that import something themselves.
 
-        These are files that nothing else imports.
+        A file with no dependencies in either direction is *isolated*, not an
+        entry point: an entry point is where execution starts, and a file that
+        imports nothing and is imported by nothing tells you nothing about
+        that. Reporting it under "files with no incoming dependencies" was
+        literally true and thoroughly misleading - for a repository of
+        standalone scripts the section listed every file in it.
+
+        See :meth:`get_isolated_files` for the other bucket. The two are
+        disjoint.
         """
-        return sorted([f for f in self.nodes if self.get_incoming_count(f) == 0])
+        return sorted([
+            f for f in self.nodes
+            if self.get_incoming_count(f) == 0 and self.get_outgoing_count(f) > 0
+        ])
 
     def get_isolated_files(self) -> list[str]:
         """
@@ -92,14 +160,25 @@ class DependencyGraph:
         """
         Return top-N files most depended on by other modules.
 
-        Filters out entry points (zero incoming dependencies) so that core
-        modules are those that actually have dependents.
-        Returns list of (file_path, incoming_count) sorted by count descending.
+        Filters out files with no dependents, so core modules are those that
+        actually have some. Returns a list of (file_path, incoming_count),
+        most depended on first, ties broken by path.
+
+        The tie-break is not cosmetic. ``self.nodes`` is a set, ``sorted`` is
+        stable, so sorting on the count alone left tied entries in set
+        iteration order - which depends on the per-process string hash seed.
+        Two runs over an unchanged repository produced two different lists,
+        and with a ``top_n`` cut across a tie, two different *sets* of files.
+        This block is pasted into the README prompt, so that made the
+        generated README irreproducible.
         """
         ranked = sorted(
-            [(f, self.get_incoming_count(f)) for f in self.nodes if self.get_incoming_count(f) > 0],
-            key=lambda x: x[1],
-            reverse=True,
+            (
+                (f, self.get_incoming_count(f))
+                for f in self.nodes
+                if self.get_incoming_count(f) > 0
+            ),
+            key=lambda item: (-item[1], item[0]),
         )
         return ranked[:top_n]
 
@@ -123,6 +202,10 @@ class DependencyGraph:
         return {
             "total_files": total_nodes,
             "total_dependencies": total_edges,
+            # entry_points and isolated_files are disjoint: a file that imports
+            # nothing and is imported by nothing is isolated, not an entry
+            # point. They used to overlap, and the two counts were presented
+            # side by side with no hint that they did.
             "entry_points": len(self.get_entry_points()),
             "isolated_files": len(self.get_isolated_files()),
             "leaf_modules": len(self.get_leaf_modules()),
@@ -136,35 +219,50 @@ class DependencyGraph:
 
         Returns markdown string with sections for Core Modules, Entry Points,
         and Dependency Statistics.
+
+        The whole block is pasted into the README generation prompt on every
+        iteration of the review loop, so it has to be stable across runs and
+        every bullet has to identify one file. Names are disambiguated against
+        the other files in the same rendering rather than truncated to a
+        basename, which produced three identical ``index.ts`` bullets for three
+        different files.
         """
         stats = self.get_dependency_stats()
 
         if stats["total_files"] == 0:
             return ""
 
+        core = self.get_core_modules(top_n=5)
+        entry_points = self.get_entry_points()
+        shown_entry_points = entry_points[:MAX_LISTED_ENTRY_POINTS]
+
+        names = display_names(
+            [path for path, _ in core] + shown_entry_points
+        )
+
         lines = ["## Dependency Overview\n"]
 
         # Core modules
-        core = self.get_core_modules(top_n=5)
         if core:
             lines.append("### Core Modules\n")
             lines.append("Files most depended on by other modules:\n")
             for file_path, count in core:
-                # Extract just the filename and relative path
-                display = file_path.split("/")[-1] if "/" in file_path else file_path
-                lines.append(f"- `{display}` ({count} incoming dependencies)\n")
+                lines.append(
+                    f"- `{names[file_path]}` ({count} incoming dependencies)\n"
+                )
             lines.append("\n")
 
         # Entry points
-        entry_points = self.get_entry_points()
         if entry_points:
             lines.append("### Entry Points\n")
-            lines.append("Files with no incoming dependencies:\n")
-            for ep in entry_points[:10]:  # Limit to top 10
-                display = ep.split("/")[-1] if "/" in ep else ep
-                lines.append(f"- `{display}`\n")
-            if len(entry_points) > 10:
-                lines.append(f"- ... and {len(entry_points) - 10} more\n")
+            lines.append(
+                "Files that import others but are not imported themselves:\n"
+            )
+            for entry_point in shown_entry_points:
+                lines.append(f"- `{names[entry_point]}`\n")
+            remaining = len(entry_points) - len(shown_entry_points)
+            if remaining > 0:
+                lines.append(f"- ... and {remaining} more\n")
             lines.append("\n")
 
         # Statistics

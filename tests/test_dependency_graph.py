@@ -594,8 +594,11 @@ class TestBuildDependencyGraph:
                 documents.append({"content": doc.page_content, "metadata": doc.metadata})
         
         graph = build_dependency_graph(documents)
-        # All files should be entry points (no dependencies)
-        assert len(graph.get_entry_points()) == len(graph.nodes)
+        # Files with no dependencies in either direction are isolated, not
+        # entry points: an entry point imports something, it is just not
+        # imported itself. See issue #131.
+        assert len(graph.get_isolated_files()) == len(graph.nodes)
+        assert graph.get_entry_points() == []
 
     def test_malformed_python(self, tmp_path):
         """Graph construction should not fail on malformed files."""
