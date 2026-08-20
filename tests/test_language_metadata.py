@@ -31,7 +31,6 @@ from repo2readme.services.summarization import (
 )
 from repo2readme.utils.detect_language import detect_lang
 
-
 # Files whose language the extension alone cannot decide. The second element is
 # what the pipeline detects; before this change the summarizer saw the third.
 AMBIGUOUS_FILES = [
@@ -314,6 +313,7 @@ class TestSummarizationUsesTheDetectedLanguage:
             )
 
         assert errors == []
+        assert len(summaries) == 1
         assert seen["language"] == "python"
 
 
