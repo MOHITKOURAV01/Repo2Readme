@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib
 import os
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -106,14 +107,14 @@ class TestYesFlag:
         result = invoke(["--yes", "-o", path], stdin="n\n")
 
         assert "already exists" in result.output
-        assert open(path, encoding="utf-8").read() == EXISTING_README
+        assert Path(path).read_text(encoding="utf-8") == EXISTING_README
 
     def test_overwrites_when_the_prompt_is_answered(self, invoke, repo):
         path = _write_existing(repo)
         result = invoke(["--yes", "-o", path], stdin="y\n")
 
         assert result.exit_code == 0
-        assert open(path, encoding="utf-8").read() == GENERATED_README
+        assert Path(path).read_text(encoding="utf-8") == GENERATED_README
 
     def test_writes_a_new_file_without_any_prompt(self, invoke, repo):
         path = _output(repo)
@@ -121,7 +122,7 @@ class TestYesFlag:
 
         assert result.exit_code == 0
         assert "already exists" not in result.output
-        assert open(path, encoding="utf-8").read() == GENERATED_README
+        assert Path(path).read_text(encoding="utf-8") == GENERATED_README
 
 
 # ---------------------------------------------------------------------------
@@ -138,13 +139,13 @@ class TestForceFlag:
         assert result.exit_code == 0
         assert "Proceed?" not in result.output
         assert "already exists" not in result.output
-        assert open(path, encoding="utf-8").read() == GENERATED_README
+        assert Path(path).read_text(encoding="utf-8") == GENERATED_README
 
     def test_short_form(self, invoke, repo):
         path = _write_existing(repo)
         result = invoke(["-f", "-o", path])
         assert result.exit_code == 0
-        assert open(path, encoding="utf-8").read() == GENERATED_README
+        assert Path(path).read_text(encoding="utf-8") == GENERATED_README
 
     def test_help_mentions_both_effects(self):
         """The old text described only the overwrite, which was half the story."""
@@ -178,7 +179,7 @@ class TestWithoutFlags:
         result = invoke(["-o", path], stdin="y\ny\n")
 
         assert result.exit_code == 0
-        assert open(path, encoding="utf-8").read() == GENERATED_README
+        assert Path(path).read_text(encoding="utf-8") == GENERATED_README
 
     def test_piped_input_still_works(self, invoke, repo):
         """`echo y | repo2readme run ...` is a legitimate way to automate this."""
@@ -207,7 +208,7 @@ class TestUnanswerableConfirmations:
 
         assert result.exit_code != 0
         assert "--force" in result.output
-        assert open(path, encoding="utf-8").read() == EXISTING_README
+        assert Path(path).read_text(encoding="utf-8") == EXISTING_README
 
     def test_the_message_is_not_a_bare_abort(self, invoke, repo):
         result = invoke(["-o", _output(repo)])
@@ -237,9 +238,10 @@ class TestConfirmEstimate:
     def test_eof_becomes_an_actionable_error(self):
         import click
 
-        with patch("click.confirm", side_effect=click.Abort()):
-            with pytest.raises(NonInteractiveError) as excinfo:
-                confirm_estimate(False)
+        with patch("click.confirm", side_effect=click.Abort()), pytest.raises(
+            NonInteractiveError
+        ) as excinfo:
+            confirm_estimate(False)
 
         assert "--yes" in str(excinfo.value)
 
@@ -256,9 +258,10 @@ class TestConfirmOverwrite:
     def test_eof_becomes_an_actionable_error(self):
         import click
 
-        with patch("click.confirm", side_effect=click.Abort()):
-            with pytest.raises(NonInteractiveError) as excinfo:
-                confirm_overwrite("README.md")
+        with patch("click.confirm", side_effect=click.Abort()), pytest.raises(
+            NonInteractiveError
+        ) as excinfo:
+            confirm_overwrite("README.md")
 
         message = str(excinfo.value)
         assert "--force" in message

@@ -395,9 +395,9 @@ def run(url, local, output, force, assume_yes, include_patterns, exclude_pattern
             rprint("\n[green]Generated README:[/green]\n")
             rprint(readme)
         else:
-            if os.path.exists(output) and not force:
-                if not confirm_overwrite(output):
-                    return
+            needs_confirmation = os.path.exists(output) and not force
+            if needs_confirmation and not confirm_overwrite(output):
+                return
 
             with open(output, "w", encoding="utf-8") as f:
                 f.write(readme)
