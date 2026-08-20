@@ -104,7 +104,7 @@ def _decode_ignoring_truncation(raw: bytes, encoding: str) -> str | None:
     a truncated sample from genuinely invalid bytes: if the remainder still
     fails to decode, the problem was not the boundary.
     """
-    for trim in range(0, 5):
+    for trim in range(5):
         candidate = raw[: len(raw) - trim] if trim else raw
         if not candidate:
             return ""

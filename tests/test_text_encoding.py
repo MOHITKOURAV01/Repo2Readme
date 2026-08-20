@@ -29,7 +29,6 @@ from repo2readme.utils.text_encoding import (
     looks_like_text,
 )
 
-
 # ---------------------------------------------------------------------------
 # BOM sniffing
 # ---------------------------------------------------------------------------
@@ -82,7 +81,7 @@ class TestDecodeBytes:
         assert result.from_bom is False
 
     def test_utf8_with_non_ascii(self):
-        result = decode_bytes("# café\n".encode("utf-8"))
+        result = decode_bytes("# café\n".encode())
         assert result.text == "# café\n"
         assert result.encoding == "utf-8-sig"
 
@@ -119,11 +118,11 @@ class TestDecodeBytes:
         assert decode_bytes(b"\xff\xfe\x00", encodings=("utf-8",)) is None
 
     def test_truncated_multibyte_character_rejected_by_default(self):
-        truncated = "café".encode("utf-8")[:-1]
+        truncated = "café".encode()[:-1]
         assert decode_bytes(truncated, encodings=("utf-8",)) is None
 
     def test_truncated_multibyte_character_allowed_when_asked(self):
-        truncated = "café".encode("utf-8")[:-1]
+        truncated = "café".encode()[:-1]
         result = decode_bytes(truncated, encodings=("utf-8",), allow_truncated=True)
         assert result is not None
         assert result.text == "caf"
@@ -205,8 +204,8 @@ class TestBinaryDetectionAcceptsTextEncodings:
     def test_valid_utf8_split_by_the_sample_boundary_is_text(self, tmp_path):
         """A multi-byte character straddling byte 8192 is not evidence of anything."""
         path = tmp_path / "long.py"
-        raw = b"#" + b"a" * 8190 + "é".encode("utf-8") + b"\nprint(1)\n"
-        assert raw[8191:8193] == "é".encode("utf-8")
+        raw = b"#" + b"a" * 8190 + "é".encode() + b"\nprint(1)\n"
+        assert raw[8191:8193] == "é".encode()
         path.write_bytes(raw)
 
         assert raw.decode("utf-8")  # the file really is valid UTF-8
