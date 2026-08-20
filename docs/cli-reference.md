@@ -69,15 +69,6 @@ at the number of files. This applies to both `--local` and `--url` runs.
 repo2readme run --url https://github.com/user/repo --max-workers 8
 ```
 
-### `--respect-gitignore`
-
-Honor `.gitignore` and `.git/info/exclude` patterns during repository traversal. This is opt-in, so the default behavior remains unchanged. When enabled, files and directories matching gitignore rules are skipped before language detection, parsing, summarization, and token estimation.
-
-```bash
-repo2readme run --local ./repo --respect-gitignore
-repo2readme run --url https://github.com/user/repo --respect-gitignore
-```
-
 ### `--yes` and `--force`
 
 `run` asks for two confirmations, and they guard different things:
@@ -109,6 +100,15 @@ When a prompt is reached and stdin has nothing left to give — a CI job, a cron
 entry — the run stops and names the flag that would have answered it, rather
 than aborting with no explanation. Nothing is written and, for the estimate,
 nothing is spent.
+
+### `--respect-gitignore`
+
+Honor `.gitignore` and `.git/info/exclude` patterns during repository traversal. This is opt-in, so the default behavior remains unchanged. When enabled, files and directories matching gitignore rules are skipped before language detection, parsing, summarization, and token estimation.
+
+```bash
+repo2readme run --local ./repo --respect-gitignore
+repo2readme run --url https://github.com/user/repo --respect-gitignore
+```
 
 ### `--strict`
 
