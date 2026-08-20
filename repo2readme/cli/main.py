@@ -41,6 +41,70 @@ def validate_max_workers_option(ctx, param, value):
         raise click.BadParameter(str(e), ctx=ctx, param=param) from e
 
 
+class NonInteractiveError(click.ClickException):
+    """A confirmation was needed and there was nobody to answer it.
+
+    ``click.confirm`` raises ``Abort`` on EOF, which produces a bare
+    "Aborted!" - in a CI job that is an exit code and nothing to act on.
+    Naming the flag that would have answered the question is the point of
+    this class.
+    """
+
+
+def _ask(question: str, unanswerable: str) -> bool:
+    """Ask a yes/no question, turning "nobody is listening" into advice.
+
+    Piped input still works (``echo y | repo2readme run ...``); this only
+    changes what happens when the stream has nothing left to give.
+    """
+    try:
+        return click.confirm(question, default=False)
+    except click.Abort as exc:
+        raise NonInteractiveError(unanswerable) from exc
+
+
+def confirm_estimate(assume_yes: bool) -> bool:
+    """Confirm the token estimate before any API call is made.
+
+    This guards the spend, which is why it is separate from the output-file
+    prompt: the two protect different things, and bundling them meant the safe
+    answer to one forced the risky answer to the other. ``--force`` still
+    implies this, because that is what it did before ``--yes`` existed.
+    """
+    if assume_yes:
+        return True
+
+    proceed = _ask(
+        "\nProceed?",
+        "The token estimate needs to be confirmed and there is nothing on "
+        "stdin to confirm it. Pass --yes to accept it (or --force to also "
+        "overwrite the output file).",
+    )
+    if proceed:
+        return True
+
+    rprint("[yellow]Operation cancelled.[/yellow]")
+    return False
+
+
+def confirm_overwrite(output: str) -> bool:
+    """Confirm replacing an existing output file.
+
+    Reached only after the README has been generated, so refusing here costs
+    the run its output but nothing that has not already been spent.
+    """
+    overwrite = _ask(
+        f"{output} already exists. Do you want to overwrite it?",
+        f"{output} already exists and there is nothing on stdin to confirm "
+        "overwriting it. Pass --force to overwrite it.",
+    )
+    if overwrite:
+        return True
+
+    rprint("[yellow]Output file was not overwritten.[/yellow]")
+    return False
+
+
 @click.group()
 @click.version_option(version=__version__, prog_name="repo2readme")
 def main():
@@ -61,7 +125,25 @@ def main():
 )
 @click.option("--local", "-l", help="Local repo path")
 @click.option("--output", "-o", default=None, type=click.Path(), help="Save README to file")
-@click.option("--force", "-f", is_flag=True, help="Overwrite output file without confirmation")
+@click.option(
+    "--force",
+    "-f",
+    is_flag=True,
+    help=(
+        "Overwrite the output file without confirmation. Implies --yes, so the "
+        "token estimate is not confirmed either."
+    ),
+)
+@click.option(
+    "--yes",
+    "-y",
+    "assume_yes",
+    is_flag=True,
+    help=(
+        "Do not ask for confirmation of the token estimate. The output file is "
+        "still protected; use --force for that."
+    ),
+)
 @click.option(
     "--include",
     "include_patterns",
@@ -127,7 +209,7 @@ def main():
     show_default=True,
     help="Branch to clone when using --url.",
 )
-def run(url, local, output, force, include_patterns, exclude_patterns, max_file_size_kb, dry_run, strict, respect_gitignore, max_workers, provider, model, base_url, branch):
+def run(url, local, output, force, assume_yes, include_patterns, exclude_patterns, max_file_size_kb, dry_run, strict, respect_gitignore, max_workers, provider, model, base_url, branch):
     """ Use --url for GitHub repo url and --local for local repo
     """
     if not url and not local:
@@ -235,11 +317,8 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
     rprint(f"Request size       : ~{format_size(total_size_bytes)}")
 
     try:
-        if not force:
-            proceed = click.confirm("\nProceed?", default=False)
-            if not proceed:
-                rprint("[yellow]Operation cancelled.[/yellow]")
-                return
+        if not confirm_estimate(assume_yes or force):
+            return
 
         try:
             setup_api_keys(provider)
@@ -317,13 +396,7 @@ def run(url, local, output, force, include_patterns, exclude_patterns, max_file_
             rprint(readme)
         else:
             if os.path.exists(output) and not force:
-                should_overwrite = click.confirm(
-                    f"{output} already exists. Do you want to overwrite it?",
-                    default=False,
-                )
-
-                if not should_overwrite:
-                    rprint("[yellow]Output file was not overwritten.[/yellow]")
+                if not confirm_overwrite(output):
                     return
 
             with open(output, "w", encoding="utf-8") as f:

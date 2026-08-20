@@ -15,7 +15,8 @@ repo2readme run [OPTIONS]
 | `--url <URL>` | `-u` | Git repository URL to clone and process. Any form `git clone` accepts. |
 | `--local <PATH>` | `-l` | Path to a local repository. |
 | `--output <FILE_PATH>` | `-o` | File path to save the generated README. Defaults to `README.md`. |
-| `--force` | `-f` | Overwrite the output file and skip the token estimation confirmation prompt. |
+| `--yes` | `-y` | Accept the token estimate without being asked. The output file is still protected. |
+| `--force` | `-f` | Overwrite the output file without confirmation. Implies `--yes`. |
 | `--strict` | | Exit with a non-zero status if any file fails to summarize. |
 | `--respect-gitignore` | | Honor `.gitignore` and `.git/info/exclude` patterns during repository traversal. This is opt-in; default behavior is unchanged. |
 | `--dry-run` | | Preview the analysis (repo tree, token estimate, files to be processed) without making any API calls or requiring API keys. |
@@ -76,6 +77,38 @@ Honor `.gitignore` and `.git/info/exclude` patterns during repository traversal.
 repo2readme run --local ./repo --respect-gitignore
 repo2readme run --url https://github.com/user/repo --respect-gitignore
 ```
+
+### `--yes` and `--force`
+
+`run` asks for two confirmations, and they guard different things:
+
+| Prompt | Guards | Answered by |
+|---|---|---|
+| `Proceed?` | the API calls, and what they cost | `--yes`, or `--force` |
+| `<file> already exists` | a README you may have written by hand | `--force` |
+
+`--force` answers both, which is what it has always done. `--yes` answers only
+the first, so a scripted run can accept the estimate while still refusing to
+replace an existing file:
+
+```bash
+# spend the tokens, but do not touch an existing README.md
+repo2readme run --local . --yes -o README.md
+
+# spend the tokens and replace whatever is there
+repo2readme run --local . --force -o README.md
+```
+
+Both prompts read from stdin, so piping an answer works:
+
+```bash
+printf 'y\ny\n' | repo2readme run --local . -o README.md
+```
+
+When a prompt is reached and stdin has nothing left to give — a CI job, a cron
+entry — the run stops and names the flag that would have answered it, rather
+than aborting with no explanation. Nothing is written and, for the estimate,
+nothing is spent.
 
 ### `--strict`
 
