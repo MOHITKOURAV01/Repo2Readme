@@ -77,6 +77,22 @@ repo2readme run --local ./repo --respect-gitignore
 repo2readme run --url https://github.com/user/repo --respect-gitignore
 ```
 
+A `.gitignore` in a subdirectory applies to that subdirectory's subtree, the
+way git applies it, so a monorepo that keeps its ignore rules next to each
+package is honored:
+
+```
+.gitignore                  # *.log
+frontend/.gitignore         # build/
+frontend/build/bundle.js    # skipped
+frontend/src/app.js         # analyzed
+```
+
+`.git/info/exclude` is repository-wide and is only read at the repository root.
+`core.excludesFile` is deliberately not consulted: it is per-machine, and
+honoring it would make the same repository produce a different README on a
+different machine.
+
 ### `--strict`
 
 Summarization is best-effort: a file that fails (rate limit, timeout, bad
