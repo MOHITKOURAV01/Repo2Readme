@@ -8,6 +8,12 @@ metadata extraction, or language detection.
 
 from __future__ import annotations
 
+from repo2readme.utils.text_encoding import (
+    decode_bytes,
+    encoding_from_bom,
+    looks_like_text,
+)
+
 # Bounded sample size for binary detection (8 KB).
 # This matches the sample size used in repo2readme.utils.detect_language.
 _MAX_SAMPLE_SIZE = 8192
@@ -52,16 +58,22 @@ def is_binary_content(file_path: str, sample_size: int = _MAX_SAMPLE_SIZE) -> bo
     large files entirely into memory. Detection is content-based and does not
     rely on file extensions.
 
-    A file is considered binary if the inspected prefix contains:
+    The prefix is classified in this order:
 
-    1. Any null byte (``\\x00``), OR
-    2. A known binary format signature (e.g., PNG, JPEG, PDF, ZIP, ELF), OR
-    3. Bytes that cannot be decoded as UTF-8 (the encoding used by
-       ``load_file_content``).
-
-    UTF-8 text files containing non-ASCII characters are *not* classified as
-    binary, because null bytes, known signatures, and invalid UTF-8 byte
-    sequences are absent from valid UTF-8 encoded text.
+    1. A UTF-16 / UTF-32 byte order mark means text. The null bytes that make
+       up half of a UTF-16 file would otherwise be read as binary evidence,
+       which is how ordinary Windows-encoded source files ended up skipped.
+    2. A known binary format signature (PNG, JPEG, PDF, ZIP, ELF, ...) means
+       binary.
+    3. A null byte outside a BOM-declared encoding means binary.
+    4. Otherwise the sample is decoded through the shared fallback chain in
+       :mod:`repo2readme.utils.text_encoding`. A multi-byte character cut in
+       half by the sample boundary is tolerated, so a valid UTF-8 file is no
+       longer called binary because of where byte 8192 lands. Because the last
+       encoding in that chain cannot fail, the decoded text is then judged on
+       its density of control characters: source files in a legacy single-byte
+       encoding pass, binaries that happen to contain no null byte in their
+       first 8 KB do not.
 
     Args:
         file_path: Absolute or relative path to the file to inspect.
@@ -69,7 +81,7 @@ def is_binary_content(file_path: str, sample_size: int = _MAX_SAMPLE_SIZE) -> bo
 
     Returns:
         True if the file appears to be binary, False if it appears to be
-        plain text (including UTF-8 with non-ASCII characters).
+        plain text (including UTF-8, UTF-16 and legacy single-byte encodings).
 
     Raises:
         OSError: If the file cannot be opened or read due to an I/O error.
@@ -78,18 +90,16 @@ def is_binary_content(file_path: str, sample_size: int = _MAX_SAMPLE_SIZE) -> bo
     if not file_path:
         raise ValueError("file_path must not be empty")
 
-    try:
-        with open(file_path, "rb") as f:
-            sample = f.read(sample_size)
-    except OSError:
-        raise
+    with open(file_path, "rb") as f:
+        sample = f.read(sample_size)
 
     if not sample:
         return False
 
-    # Null bytes are a strong, extension-independent indicator of binary data.
-    if b"\x00" in sample:
-        return True
+    # A byte order mark is an explicit declaration of a text encoding, so it is
+    # checked before anything else - including the null-byte rule, which every
+    # UTF-16 file would otherwise trip on its second byte.
+    bom_encoding = encoding_from_bom(sample)
 
     # Check for known binary signatures in the file prefix.
     prefix = sample[:12]
@@ -97,12 +107,13 @@ def is_binary_content(file_path: str, sample_size: int = _MAX_SAMPLE_SIZE) -> bo
         if any(prefix.startswith(sig) for sig in signatures):
             return True
 
-    # Fallback: try to decode the sample as UTF-8 (the encoding used by
-    # load_file_content). If the sample cannot be decoded as valid UTF-8,
-    # the file is binary even without null bytes or a known signature.
-    try:
-        sample.decode("utf-8")
-    except UnicodeDecodeError:
+    if bom_encoding is None and b"\x00" in sample:
+        # Null bytes are a strong, extension-independent indicator of binary
+        # data in any encoding that does not declare itself.
         return True
 
-    return False
+    decoded = decode_bytes(sample, allow_truncated=True)
+    if decoded is None:
+        return True
+
+    return not looks_like_text(decoded.text)
