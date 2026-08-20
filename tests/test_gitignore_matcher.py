@@ -13,16 +13,22 @@ from __future__ import annotations
 
 import pytest
 
-pathspec = pytest.importorskip("pathspec")
-
-from repo2readme.loaders.traversal.pipeline import TraversalPipeline  # noqa: E402
-from repo2readme.utils import gitignore as gitignore_module  # noqa: E402
-from repo2readme.utils.gitignore import (  # noqa: E402
+from repo2readme.loaders.traversal.pipeline import TraversalPipeline
+from repo2readme.utils import gitignore as gitignore_module
+from repo2readme.utils.gitignore import (
     GitignoreMatcher,
     clear_matcher_cache,
     get_matcher,
     is_gitignored,
 )
+
+# pathspec is an optional dependency; without it gitignore support is a no-op
+# and there is nothing here to assert. Declared as a module-level mark rather
+# than an importorskip so the imports above can stay at the top of the file.
+pytestmark = pytest.mark.skipif(
+    gitignore_module.pathspec is None, reason="pathspec is not installed"
+)
+pathspec = gitignore_module.pathspec
 
 
 @pytest.fixture(autouse=True)
