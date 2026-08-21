@@ -1,4 +1,7 @@
 import pytest
+from langchain_core.exceptions import (
+    OutputParserException as RealOutputParserException,
+)
 
 from repo2readme.utils.retry import (
     DEFAULT_BASE_DELAY,
@@ -109,6 +112,11 @@ class TestClassification:
 
     def test_parser_failures_are_retryable(self):
         assert is_retryable(OutputParserException("Invalid json output: ```json"))
+
+    def test_the_real_langchain_parser_exception_is_retryable(self):
+        # The stub above does not inherit from ValueError; the real class does,
+        # which is what used to make this classification come out wrong.
+        assert is_retryable(RealOutputParserException("Invalid json output: {"))
 
     def test_unknown_errors_are_not_retried(self):
         # Better to fail fast than to burn three attempts on a real bug.
