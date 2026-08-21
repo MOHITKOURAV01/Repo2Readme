@@ -86,7 +86,13 @@ class SummaryCache:
 
     Thread-safe: all public methods acquire an instance-level lock, and the
     disk write itself is serialised separately so workers are not blocked on
-    fsync while another thread is writing.
+    fsync while another thread is writing. Where both locks are held, ``_lock``
+    is always taken before ``_io_lock``.
+
+    A failed write is not fatal - the cache is an optimisation - but it is never
+    reported as a success: the dirty flag survives it so a later flush retries,
+    :meth:`flush` returns ``False``, and the reason is available from
+    :attr:`last_write_error` and counted in :meth:`stats`.
     """
 
     def __init__(
@@ -111,6 +117,7 @@ class SummaryCache:
         self._pending_updates = 0
         self._lock = threading.Lock()
         self._io_lock = threading.Lock()
+        self._last_write_error: Optional[str] = None
         self._stats = {
             "hits": 0,
             "misses": 0,
@@ -118,6 +125,7 @@ class SummaryCache:
             "removals": 0,
             "invalidations": 0,
             "disk_writes": 0,
+            "write_failures": 0,
         }
 
     # ------------------------------------------------------------------
@@ -132,29 +140,48 @@ class SummaryCache:
 
     def flush(self) -> bool:
         """
-        Write pending changes to disk. Returns True if a write happened.
+        Write pending changes to disk. Returns True if the write succeeded.
 
         Serialisation happens under the state lock; the disk write itself does
         not, so summarization workers are not blocked while the file is being
         replaced.
+
+        The dirty flag is only cleared once the bytes are on disk. Clearing it
+        up front meant a failed write threw the pending work away: the CLI
+        flushes exactly once, at the end of the run, so a single unwritable
+        cache file silently discarded every summary the run had produced.
         """
         with self._lock:
             if not self._dirty or self._data is None:
                 return False
             payload = self._serialize()
+            pending = self._pending_updates
             self._dirty = False
             self._pending_updates = 0
 
-        self._write(payload)
-        return True
+        if self._write(payload):
+            return True
+
+        with self._lock:
+            # Another thread may have made changes of its own while the write
+            # was in flight; either way there is something to write again.
+            self._dirty = True
+            self._pending_updates = max(self._pending_updates, pending)
+        return False
+
+    @property
+    def last_write_error(self) -> Optional[str]:
+        """Why the last write failed, or ``None`` if the last one succeeded."""
+        with self._io_lock:
+            return self._last_write_error
 
     def stats(self) -> dict:
         """
         Counters for the current process: cache hits and misses, in-memory
-        updates and removals, invalidations, and how many times the file was
-        actually rewritten.
+        updates and removals, invalidations, how many times the file was
+        actually rewritten, and how many writes failed.
         """
-        with self._lock:
+        with self._lock, self._io_lock:
             return dict(self._stats)
 
     # ------------------------------------------------------------------
@@ -225,8 +252,19 @@ class SummaryCache:
         """Render the current state. Caller must hold ``_lock``."""
         return json.dumps(self._data, indent=2)
 
-    def _write(self, payload: str) -> None:
-        """Atomically replace the cache file with ``payload``."""
+    def _write(self, payload: str) -> bool:
+        """
+        Atomically replace the cache file with ``payload``.
+
+        Returns True if the bytes reached the disk. A failure is logged at error
+        level rather than raised - losing the cache costs time on the next run,
+        not correctness - but it is reported, because the caller has to know not
+        to treat the pending work as saved.
+
+        The counters are updated under ``_io_lock``, which this method already
+        holds; incrementing them outside it let concurrent writers lose an
+        increment.
+        """
         with self._io_lock:
             self._ensure_cache_dir()
             try:
@@ -247,22 +285,34 @@ class SummaryCache:
                         pass
                     raise
             except OSError as e:
-                logger.warning(f"Failed to write cache file: {e}")
-                return
+                logger.error("Failed to write cache file %s: %s", self.cache_file, e)
+                self._last_write_error = str(e)
+                self._stats["write_failures"] += 1
+                return False
 
-        self._stats["disk_writes"] += 1
+            self._last_write_error = None
+            self._stats["disk_writes"] += 1
+            return True
 
-    def _save(self) -> None:
+    def _save(self) -> bool:
         """
-        Write immediately. Caller must hold ``_lock``.
+        Write immediately. Caller must hold ``_lock``. Returns True on success.
 
         Kept for callers that need the write to have happened by the time they
-        return; the batched path goes through :meth:`_touch` instead.
+        return; the batched path goes through :meth:`_touch` instead. On failure
+        the state stays dirty so the next flush tries again.
         """
         payload = self._serialize()
+        pending = self._pending_updates
         self._dirty = False
         self._pending_updates = 0
-        self._write(payload)
+
+        if self._write(payload):
+            return True
+
+        self._dirty = True
+        self._pending_updates = pending
+        return False
 
     def _touch(self) -> None:
         """
