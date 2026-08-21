@@ -153,6 +153,34 @@ since they exist to document variable *names*.
 repo2readme run --local . --include "data/schema.json"
 ```
 
+## File encodings
+
+Files are read as bytes and decoded through a fixed chain, in this order:
+
+| Step | Encoding | Why |
+| --- | --- | --- |
+| 1 | the encoding declared by a byte order mark | UTF-8, UTF-16 and UTF-32 BOMs are an explicit statement of encoding |
+| 2 | `utf-8-sig` | UTF-8, with a BOM consumed rather than kept as the first character |
+| 3 | `cp1252` | what Windows editors wrote before UTF-8 became the default |
+| 4 | `latin-1` | accepts any byte sequence, so the chain always terminates |
+
+The encoding that was used is reported at debug level:
+
+```bash
+repo2readme run --local . -vv
+```
+
+Before a file is read it is checked for binary content. A file is treated as
+binary when it starts with a known binary signature (PNG, ZIP, ELF, ...), when
+it contains a null byte outside a BOM-declared encoding, or when the decoded
+sample is mostly control characters. Everything else is treated as text.
+
+One case is deliberately not recoverable: **UTF-16 without a byte order mark**.
+Those files are half null bytes and carry nothing to distinguish them from
+binary data, so they are skipped as `binary_file`. Re-saving them with a BOM,
+or as UTF-8, makes them readable. Use `--include` if you need a file the binary
+check refuses.
+
 ## README post-processing
 
 The model's answer is not written to disk verbatim. Two things happen first.

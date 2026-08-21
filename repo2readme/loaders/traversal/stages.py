@@ -7,6 +7,7 @@ that implement each stage of the pipeline.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from enum import Enum
@@ -15,6 +16,9 @@ from collections import OrderedDict
 
 from repo2readme.utils.filter import github_file_filter
 from repo2readme.utils.gitignore import is_gitignored
+from repo2readme.utils.text_encoding import decode_bytes, describe_chain
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -422,17 +426,24 @@ def load_file_content(
     """
     Safely read the content of a file.
 
-    When TextLoader is available (not None), uses it as the primary path
-    for backward compatibility with tests. Otherwise, uses plain file
-    reading first (fast, no heavy dependencies) and falls back to TextLoader
-    only if the plain read fails with a UnicodeDecodeError.
+    The file is read as bytes once and decoded through the shared fallback
+    chain in :mod:`repo2readme.utils.text_encoding`: a byte order mark if there
+    is one, then ``utf-8-sig``, ``cp1252`` and ``latin-1``. Reading as UTF-8
+    and nothing else meant a single accented byte anywhere in a file removed it
+    from the analysis, reported as ``encoding_error`` with no indication of
+    what had been tried.
+
+    ``TextLoader`` is still honoured when a test has patched it, because that
+    is the only thing that ever sets it.
 
     Returns (content, None) on success, or (None, error_message) on failure.
+    Failures are logged rather than printed: this runs underneath a
+    ``rich.progress`` bar, and stdout is where that bar lives.
     """
     # When TextLoader is patched in tests, use it as the primary path to
     # preserve backward-compatible behavior. In normal operation TextLoader
-    # is None, so fall back to plain open() to avoid eagerly importing
-    # langchain for ordinary UTF-8 files.
+    # is None, so fall back to reading the bytes directly and avoid eagerly
+    # importing langchain for ordinary files.
     try:
         from repo2readme.loaders.loader import TextLoader as _TextLoader
         if _TextLoader is not None:
@@ -442,31 +453,51 @@ def load_file_content(
                 return docs[0].page_content, None
             return "", None
     except UnicodeDecodeError:
-        # TextLoader failed due to encoding; fall back to plain open()
-        pass
+        # TextLoader failed due to encoding; fall back to decoding here.
+        logger.debug(
+            "TextLoader could not decode %s, falling back to %s",
+            absolute_path,
+            describe_chain(),
+        )
     except OSError as error:
         msg = f"permission_error: {error}"
-        print(f"[ERROR] Permission/OS error loading {absolute_path}: {error}")
+        logger.warning("Cannot read %s: %s", absolute_path, error)
         return None, msg
     except Exception as error:
         msg = f"load_error: {error}"
-        print(f"[ERROR] Cannot load {absolute_path}: {error}")
+        logger.warning("Cannot load %s: %s", absolute_path, error)
         return None, msg
 
-    # Fast path: plain UTF-8 read without importing langchain.
     try:
-        with open(absolute_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        return content, None
-    except UnicodeDecodeError:
-        msg = "encoding_error"
-        print(f"[ERROR] Encoding error loading {absolute_path}")
-        return None, msg
+        with open(absolute_path, "rb") as f:
+            raw = f.read()
     except OSError as error:
         msg = f"permission_error: {error}"
-        print(f"[ERROR] Permission/OS error loading {absolute_path}: {error}")
+        logger.warning("Cannot read %s: %s", absolute_path, error)
         return None, msg
     except Exception as error:
         msg = f"load_error: {error}"
-        print(f"[ERROR] Cannot load {absolute_path}: {error}")
+        logger.warning("Cannot load %s: %s", absolute_path, error)
         return None, msg
+
+    decoded = decode_bytes(raw)
+    if decoded is None:
+        # Unreachable while latin-1 terminates the chain, but a caller may pass
+        # a narrower one, and silently returning empty content would be worse.
+        msg = f"encoding_error: not decodable as {describe_chain()}"
+        logger.warning(
+            "Cannot decode %s as any of: %s",
+            absolute_path,
+            describe_chain(),
+        )
+        return None, msg
+
+    if decoded.encoding not in ("utf-8", "utf-8-sig"):
+        logger.debug(
+            "Decoded %s as %s%s",
+            absolute_path,
+            decoded.encoding,
+            " (from byte order mark)" if decoded.from_bom else "",
+        )
+
+    return decoded.text, None
