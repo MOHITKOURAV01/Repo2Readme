@@ -228,11 +228,15 @@ def _detect_by_extension(path: str) -> Optional[str]:
     Detect language based on file extension.
     Returns language string or None if no match.
     """
-    _, extension = os.path.splitext(path)
+    basename = os.path.basename(path)
+    _, extension = os.path.splitext(basename)
 
-    # Handle dotfiles (e.g., ".gitignore", ".env")
-    if not extension and path.startswith("."):
-        extension = path
+    # Handle dotfiles (e.g. ".dockerignore"): splitext treats a leading-dot
+    # basename as having no extension, so the whole name is the lookup key.
+    # This has to be the basename rather than ``path``, or the rule only fires
+    # for a bare filename and never for the absolute paths the pipeline passes.
+    if not extension and basename.startswith("."):
+        extension = basename
 
     return EXTENSION_LANGUAGE_MAP.get(extension.lower(), None)
 

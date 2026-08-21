@@ -45,7 +45,11 @@ class FilteredFile:
 
 @dataclass(frozen=True)
 class FileMetadata:
-    """Extracted metadata for a single file."""
+    """Extracted metadata for a single file.
+
+    ``mtime`` is read from the same ``stat`` call as ``file_size`` because the
+    summary cache stores it, and nothing was ever putting a value there.
+    """
 
     absolute_path: str
     relative_path: str
@@ -53,6 +57,7 @@ class FileMetadata:
     file_type: str
     file_size: int
     language: str
+    mtime: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -368,9 +373,12 @@ def extract_file_metadata(
     """Extract metadata from a filtered file."""
     _, ext = os.path.splitext(filtered.file_name)
     try:
-        file_size = os.path.getsize(filtered.absolute_path)
+        stat_result = os.stat(filtered.absolute_path)
+        file_size = stat_result.st_size
+        mtime = stat_result.st_mtime
     except OSError:
         file_size = len(content.encode("utf-8"))
+        mtime = 0.0
 
     return FileMetadata(
         absolute_path=filtered.absolute_path,
@@ -378,6 +386,7 @@ def extract_file_metadata(
         file_name=filtered.file_name,
         file_type=ext.lower(),
         file_size=file_size,
+        mtime=mtime,
         language="unknown",  # populated in the language detection stage
     )
 
@@ -401,7 +410,18 @@ def detect_file_language(metadata: FileMetadata, content: str) -> str:
 
 
 def create_document(metadata: FileMetadata, content: str) -> DocumentResult:
-    """Build the final DocumentResult from metadata and content."""
+    """Build the final DocumentResult from metadata and content.
+
+    Everything the language detection stage worked out is carried through here.
+    It used to be dropped: ``language`` was detected from the full path and the
+    content, then left out of this dict, so the summarizer re-detected it from
+    ``file_type`` alone - which is the bare extension, and empty for a
+    ``Gemfile`` or a ``Jenkinsfile``.
+
+    ``file_size`` and ``mtime`` come along for the same reason. Both are known
+    by the time this runs, and ``SummaryCache.put`` stores an ``mtime`` that
+    was always ``0`` because nothing supplied one.
+    """
     return DocumentResult(
         page_content=content,
         metadata=OrderedDict(
@@ -410,6 +430,9 @@ def create_document(metadata: FileMetadata, content: str) -> DocumentResult:
                 ("file_name", metadata.file_name),
                 ("file_type", metadata.file_type),
                 ("relative_path", metadata.relative_path),
+                ("language", metadata.language),
+                ("file_size", metadata.file_size),
+                ("mtime", metadata.mtime),
             ]
         ),
     )

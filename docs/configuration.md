@@ -216,6 +216,24 @@ section is never mistaken for the document's own headings, links or images.
 
 Run with `-v` to see these warnings if your console is configured to hide them.
 
+## Language detection
+
+The language of a file is decided once, during traversal, and then travels with
+the document. Detection tries, in order:
+
+1. the file extension (`.py`, `.ts`, `.go`, ...)
+2. the filename, for files that have no extension (`Dockerfile`, `Makefile`,
+   `Jenkinsfile`, `Gemfile`, `Rakefile`, ...)
+3. a `#!` shebang on the first line
+4. content markers
+
+The result is stored on the document as `metadata["language"]` and is what the
+summarizer is told and what the cache key is built from, so a `Gemfile` is
+summarized as Ruby and a `Jenkinsfile` as Groovy rather than as whatever their
+punctuation resembles.
+
+Run with `-vv` to see the language chosen per file.
+
 ## Summary Cache
 
 `repo2readme` maintains a local cache of file summaries to avoid redundant API calls.
