@@ -1,6 +1,7 @@
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from repo2readme.llm.factory import create_llm
+from repo2readme.llm.timeouts import resolve_timeout
 from repo2readme.utils.retry import call_with_retry
 import json
 import logging
@@ -31,11 +32,12 @@ Return ONLY JSON.
 {format_instructions}
 """
 
-def summarize_directory(dir_path, contents_summaries, provider=None, model_name=None, base_url=None):
+def summarize_directory(dir_path, contents_summaries, provider=None, model_name=None, base_url=None, timeout=None):
     model = create_llm(
         provider=provider or "groq",
         model=model_name,
         base_url=base_url,
+        timeout=resolve_timeout(timeout),
     )
     parser = JsonOutputParser()
     prompt = PromptTemplate(

@@ -42,6 +42,12 @@ class ProviderSpec:
         Alternative names accepted on the command line, e.g. ``"gemini"``.
     default_base_url:
         Base URL applied when the user does not pass ``--base-url``.
+    timeout_kwarg:
+        Constructor argument this provider's client takes a per-request
+        deadline through. The four libraries spell it four different ways -
+        ``request_timeout``, ``default_request_timeout``, ``timeout`` - and
+        Ollama takes none at all, reaching its transport through
+        ``client_kwargs`` instead, which the factory handles.
     """
 
     name: str
@@ -50,6 +56,7 @@ class ProviderSpec:
     env_var: str | None = None
     aliases: tuple[str, ...] = field(default_factory=tuple)
     default_base_url: str | None = None
+    timeout_kwarg: str | None = None
 
     @property
     def requires_api_key(self) -> bool:
@@ -62,6 +69,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         label="Groq",
         default_model="openai/gpt-oss-120b",
         env_var="GROQ_API_KEY",
+        timeout_kwarg="request_timeout",
     ),
     ProviderSpec(
         name="google",
@@ -69,12 +77,14 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_model="gemini-2.5-flash",
         env_var="GOOGLE_API_KEY",
         aliases=("gemini",),
+        timeout_kwarg="timeout",
     ),
     ProviderSpec(
         name="openai",
         label="OpenAI",
         default_model="gpt-4o-mini",
         env_var="OPENAI_API_KEY",
+        timeout_kwarg="request_timeout",
     ),
     ProviderSpec(
         name="anthropic",
@@ -82,6 +92,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_model="claude-sonnet-4-5",
         env_var="ANTHROPIC_API_KEY",
         aliases=("claude",),
+        timeout_kwarg="default_request_timeout",
     ),
     ProviderSpec(
         name="openrouter",
@@ -89,6 +100,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_model="openai/gpt-4o-mini",
         env_var="OPENROUTER_API_KEY",
         default_base_url="https://openrouter.ai/api/v1",
+        timeout_kwarg="request_timeout",
     ),
     ProviderSpec(
         name="together",
@@ -96,6 +108,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
         env_var="TOGETHER_API_KEY",
         default_base_url="https://api.together.xyz/v1",
+        timeout_kwarg="request_timeout",
     ),
     ProviderSpec(
         name="ollama",

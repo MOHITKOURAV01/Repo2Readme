@@ -3,6 +3,7 @@ from pydantic import BaseModel,Field
 from langchain_core.prompts import PromptTemplate
 import os
 from repo2readme.llm.factory import create_llm
+from repo2readme.llm.timeouts import readme_timeout
 from repo2readme.utils.retry import call_with_retry
 
 
@@ -15,11 +16,13 @@ def readme_reviewer(
     provider: str | None = None,
     model_name: str | None = None,
     base_url: str | None = None,
+    timeout: float | None = None,
 ):
     model = create_llm(
         provider=provider or "google",
         model=model_name,
         base_url=base_url,
+        timeout=readme_timeout(timeout),
     )
     parser=PydanticOutputParser(pydantic_object=ReviewSchema)
     review_prompt=PromptTemplate(

@@ -2,6 +2,7 @@ from langchain_core.prompts import PromptTemplate  # noqa: E402
 from langchain_core.output_parsers import StrOutputParser  # noqa: E402
 from typing import List  # noqa: E402
 from repo2readme.llm.factory import create_llm  # noqa: E402
+from repo2readme.llm.timeouts import readme_timeout  # noqa: E402
 from repo2readme.utils.retry import call_with_retry  # noqa: E402
 
 
@@ -14,11 +15,16 @@ def generate_readme(
     model_name: str,
     base_url: str,
     dependency_overview: str = "",
+    timeout: float | None = None,
 ):
+    # Writing a whole document from every summary in the repository takes
+    # longer than describing one file, so the flag is scaled rather than
+    # applied flat.
     model = create_llm(
         provider=provider or "groq",
         model=model_name,
         base_url=base_url,
+        timeout=readme_timeout(timeout),
     )
 
     prompt = PromptTemplate(

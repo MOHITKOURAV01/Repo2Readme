@@ -20,7 +20,8 @@ def run_pipeline(
     dependency_overview: str,
     provider: str | None,
     model: str | None,
-    base_url: str | None
+    base_url: str | None,
+    timeout: float | None = None,
 ) -> str:
     """
     Invokes the LangGraph workflow to generate the README and returns the result.
@@ -50,6 +51,7 @@ def run_pipeline(
         "provider": provider,
         "model": model,
         "base_url": base_url,
+        "timeout": timeout,
         "dependency_overview": dependency_overview,
     }
 

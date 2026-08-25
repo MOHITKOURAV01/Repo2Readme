@@ -23,6 +23,7 @@ repo2readme run [OPTIONS]
 | `--dry-run` | | Preview the analysis (repo tree, token estimate, files to be processed) without making any API calls or requiring API keys. |
 | `--include <PATTERN>` | | Glob pattern for files to include, even if normally filtered out. Can be passed multiple times. |
 | `--exclude <PATTERN>` | | Glob pattern for files to exclude. Can be passed multiple times. |
+| `--timeout <SECONDS>` | | Deadline for one provider request. Defaults to 120. `0` disables it. |
 | `--max-file-size-kb <N>` | | Skip files larger than N KB. |
 | `--provider <NAME>` | | LLM provider to use. See `repo2readme providers`. |
 | `--model <NAME>` | | Model name. Defaults to the selected provider's default model. |
@@ -105,6 +106,30 @@ at the number of files. This applies to both `--local` and `--url` runs.
 ```bash
 repo2readme run --url https://github.com/user/repo --max-workers 8
 ```
+
+### `--timeout`
+
+How long to wait for a single provider request before giving up. Defaults to
+120 seconds. The README generation and review stages get three times this,
+since writing a whole document from every summary in the repository takes
+longer than describing one file.
+
+```bash
+repo2readme run --local . --timeout 300     # a slow model, or very large files
+repo2readme run --local . --timeout 0       # no deadline at all
+```
+
+Without a deadline a connection that is accepted and never answered holds a
+worker thread for as long as the process lives. With four workers that is four
+stalled requests away from a run that never finishes and does not respond to
+Ctrl-C — a thread blocked in a socket read cannot be interrupted, and the pool
+is waited on at shutdown.
+
+A request that runs out of time is retried like any other transient failure,
+so a single slow response does not cost the file.
+
+Use `0` when you are deliberately driving something slow, such as a local
+Ollama model that has to load first.
 
 ### `--respect-gitignore`
 

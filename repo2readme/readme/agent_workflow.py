@@ -29,6 +29,7 @@ class ReadmeState(TypedDict):
     provider: str | None
     model: str | None
     base_url: str | None
+    timeout: float | None
     dependency_overview: str
 
 
@@ -61,6 +62,7 @@ def generate_readme_node(state: ReadmeState):
         provider=state["provider"],
         model_name=state["model"],
         base_url=state["base_url"],
+        timeout=state.get("timeout"),
         dependency_overview=state.get("dependency_overview", "")
     )
 
@@ -78,6 +80,7 @@ def readme_reviewer_node(state: ReadmeState):
             provider=state["provider"],
             model_name=state["model"],
             base_url=state["base_url"],
+            timeout=state.get("timeout"),
         )
     except Exception as exc:
         # The reviewer is an improvement step, not a gate. Losing it costs the

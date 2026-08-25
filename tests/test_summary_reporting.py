@@ -179,12 +179,11 @@ def _patch_pipeline(monkeypatch, summaries, errors=None, readme="# Generated"):
                                     base_url, progress, task_id, **kwargs):
         return summaries, list(errors or [])
 
-    def fake_generate_hierarchical_summaries(file_summaries, provider, model,
-                                             base_url, progress, task_id):
+    def fake_generate_hierarchical_summaries(file_summaries, **kwargs):
         captured["rollup_input"] = file_summaries
         return file_summaries
 
-    def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
+    def fake_run_pipeline(summaries, tree, dependency_overview, **kwargs):
         captured["readme_input"] = summaries
         return readme
 

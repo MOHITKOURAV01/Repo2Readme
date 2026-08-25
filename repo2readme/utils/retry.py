@@ -85,6 +85,21 @@ PARSER_EXCEPTION_MARKERS = (
     "jsondecodeerror",
 )
 
+# Exception classes the provider SDKs raise when a deadline is reached. Matched
+# by class name across the MRO because the message is often empty - httpx's
+# ReadTimeout carries the URL and nothing else - so the message patterns above
+# cannot see them, and openai.APITimeoutError is an APIConnectionError rather
+# than a TimeoutError.
+TIMEOUT_EXCEPTION_MARKERS = (
+    "timeouterror",
+    "timeoutexception",
+    "readtimeout",
+    "writetimeout",
+    "connecttimeout",
+    "pooltimeout",
+    "deadlineexceeded",
+)
+
 _STATUS_IN_MESSAGE = re.compile(r"\berror code:\s*(\d{3})\b", re.IGNORECASE)
 _RETRY_AFTER_IN_MESSAGE = re.compile(
     r"try again in\s+(\d+(?:\.\d+)?)\s*(ms|s|m)\b", re.IGNORECASE
@@ -186,6 +201,18 @@ def is_parse_error(exc: BaseException) -> bool:
     )
 
 
+def is_timeout_error(exc: BaseException) -> bool:
+    """Whether ``exc`` means the request ran out of time.
+
+    Now that every request has a deadline, this is the exception the retry
+    exists for: before, a hung connection never raised at all.
+    """
+    names = exception_class_names(exc)
+    return any(
+        marker in name for name in names for marker in TIMEOUT_EXCEPTION_MARKERS
+    )
+
+
 def is_retryable(exc: BaseException) -> bool:
     """Whether another attempt could plausibly succeed."""
     # Checked before the programming-error rejection below, because
@@ -194,6 +221,12 @@ def is_retryable(exc: BaseException) -> bool:
     # output, so scanning it for phrases like "authentication" reads the answer
     # as if it were an error report.
     if is_parse_error(exc):
+        return True
+
+    # A deadline says nothing about whether the request was well formed, so it
+    # is worth another attempt - and it is checked here for the same reason as
+    # the parse errors: some of these subclass ValueError.
+    if is_timeout_error(exc):
         return True
 
     # Programming and configuration errors: never worth a retry.

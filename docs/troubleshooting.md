@@ -82,6 +82,24 @@ Authentication failures, unsupported providers and context-length errors are
 never retried — retrying cannot fix them, and failing immediately tells you
 what is actually wrong.
 
+## The run hangs with no output
+
+Every request has a deadline now — 120 seconds by default, three times that for
+the README stage — so a connection that is accepted and never answered fails,
+is retried, and eventually reports the file as a failure instead of stalling
+the run.
+
+If a run does sit still, check `--timeout` has not been set to `0`, and point
+`-v` at it to see the retries:
+
+```bash
+repo2readme run --local . -v --timeout 30
+```
+
+A local provider is the usual cause: `--provider ollama` defaults to
+`http://localhost:11434`, and a model still loading, or a base URL pointing at
+a port where something else is listening, both look like this.
+
 ## Generated README looks incomplete or low quality
 
 The tool iterates internally until the reviewer agent scores the draft 8.5+ or a max iteration count is hit. If quality is still off, check that your repo's key files (entry points, config, core logic) aren't being filtered out — run with `--dry-run` to confirm they're in the "Files to be processed" list.

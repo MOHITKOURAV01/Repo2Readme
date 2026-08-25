@@ -4,6 +4,7 @@ import os
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from repo2readme.llm.timeouts import DEFAULT_TIMEOUT_SECONDS
 from repo2readme.providers import get_provider
 
 
@@ -14,11 +15,39 @@ def _missing_package(package: str, provider_label: str) -> ImportError:
     )
 
 
+def _timeout_kwargs(spec, timeout: float | None, kwargs: dict) -> dict:
+    """Translate a deadline into the argument this provider's client takes.
+
+    Every library spells it differently, so the name lives in the registry.
+    A caller that set its own timeout keyword wins: nothing that configures a
+    deadline today is overridden.
+    """
+    if timeout is None or timeout <= 0:
+        # No deadline: leave the client on its own default, which is what the
+        # user asked for by passing 0.
+        return {}
+
+    if spec.timeout_kwarg:
+        if spec.timeout_kwarg in kwargs:
+            return {}
+        return {spec.timeout_kwarg: timeout}
+
+    # Ollama's ChatOllama takes no timeout argument of its own; the deadline
+    # has to reach the httpx client it builds.
+    if spec.name == "ollama":
+        if "client_kwargs" in kwargs:
+            return {}
+        return {"client_kwargs": {"timeout": timeout}}
+
+    return {}
+
+
 def create_llm(
     provider: str,
     model: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
+    timeout: float | None = DEFAULT_TIMEOUT_SECONDS,
     **kwargs,
 ) -> BaseChatModel:
     """
@@ -35,6 +64,11 @@ def create_llm(
     base_url : str | None
         Optional base URL. Falls back to the provider's default base URL,
         which is what makes the OpenAI-compatible providers work out of the box.
+    timeout : float | None
+        Per-request deadline in seconds, already resolved by
+        :mod:`repo2readme.llm.timeouts`. ``None`` or ``0`` means no deadline.
+        Translated to whichever keyword this provider's client accepts, since
+        the four libraries spell it four different ways.
 
     Raises
     ------
@@ -48,6 +82,7 @@ def create_llm(
     model = model or spec.default_model
     base_url = base_url or spec.default_base_url
     resolved_key = api_key or (os.getenv(spec.env_var) if spec.env_var else None)
+    kwargs.update(_timeout_kwargs(spec, timeout, kwargs))
 
     if name == "groq":
         try:

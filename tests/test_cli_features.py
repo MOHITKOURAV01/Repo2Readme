@@ -145,10 +145,10 @@ def test_normal_run_user_confirms(monkeypatch, tmp_path):
         summarize_called = True
         return [{"file_path": "main.py", "description": "fake summary"}], []
 
-    def fake_generate_hierarchical_summaries(file_summaries, provider, model, base_url, progress, task_id):
+    def fake_generate_hierarchical_summaries(file_summaries, **kwargs):
         return file_summaries
 
-    def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
+    def fake_run_pipeline(summaries, tree, dependency_overview, **kwargs):
         nonlocal workflow_called
         workflow_called = True
         return "fake readme contents"
@@ -195,10 +195,10 @@ def test_normal_run_force_bypasses_confirmation(monkeypatch, tmp_path):
         summarize_called = True
         return [{"file_path": "main.py", "description": "fake summary"}], []
 
-    def fake_generate_hierarchical_summaries(file_summaries, provider, model, base_url, progress, task_id):
+    def fake_generate_hierarchical_summaries(file_summaries, **kwargs):
         return file_summaries
 
-    def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
+    def fake_run_pipeline(summaries, tree, dependency_overview, **kwargs):
         nonlocal workflow_called
         workflow_called = True
         return "fake readme contents"

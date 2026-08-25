@@ -33,6 +33,11 @@ from repo2readme.services.summarization import generate_all_summaries, generate_
 from repo2readme.services.orchestrator import ReadmeGenerationError, run_pipeline
 from repo2readme.services.reporting import partition_summaries, render_report
 from repo2readme.utils.workers import validate_max_workers
+from repo2readme.llm.timeouts import (
+    DEFAULT_TIMEOUT_SECONDS,
+    InvalidTimeoutError,
+    validate_timeout,
+)
 
 
 def validate_max_workers_option(ctx, param, value):
@@ -45,6 +50,14 @@ def validate_max_workers_option(ctx, param, value):
     try:
         return validate_max_workers(value)
     except ValueError as e:
+        raise click.BadParameter(str(e), ctx=ctx, param=param) from e
+
+
+def validate_timeout_option(ctx, param, value):
+    """Reject an unusable --timeout before the repository is loaded."""
+    try:
+        return validate_timeout(value)
+    except InvalidTimeoutError as e:
         raise click.BadParameter(str(e), ctx=ctx, param=param) from e
 
 
@@ -125,6 +138,17 @@ def main():
     help="Number of parallel worker threads for file processing (default: 4, capped at file count)",
 )
 @click.option(
+    "--timeout",
+    default=DEFAULT_TIMEOUT_SECONDS,
+    show_default=True,
+    type=float,
+    callback=validate_timeout_option,
+    help=(
+        "Seconds to wait for one provider request before giving up. "
+        "The README and review stages get three times this. Use 0 for no timeout."
+    ),
+)
+@click.option(
     "--provider",
     default=None,
     help=f"LLM provider ({provider_choices_help()}). Run 'repo2readme providers' for details.",
@@ -146,7 +170,7 @@ def main():
     show_default=True,
     help="Branch to clone when using --url.",
 )
-def run(url, local, output, force, backup, create_dirs, include_patterns, exclude_patterns, max_file_size_kb, dry_run, strict, respect_gitignore, max_workers, provider, model, base_url, branch):
+def run(url, local, output, force, backup, create_dirs, include_patterns, exclude_patterns, max_file_size_kb, dry_run, strict, respect_gitignore, max_workers, timeout, provider, model, base_url, branch):
     """ Use --url for GitHub repo url and --local for local repo
     """
     if not url and not local:
@@ -289,6 +313,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
                 model=model,
                 base_url=base_url,
                 max_workers=max_workers,
+                timeout=timeout,
                 progress=progress,
                 task_id=task
             )
@@ -313,6 +338,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
                 provider=provider,
                 model=model,
                 base_url=base_url,
+                timeout=timeout,
                 progress=progress,
                 task_id=rollup_task
             )
@@ -333,7 +359,8 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
                 dependency_overview=dependency_overview,
                 provider=provider,
                 model=model,
-                base_url=base_url
+                base_url=base_url,
+                timeout=timeout,
             )
         except ReadmeGenerationError as e:
             # Nothing is written: an empty README would replace the user's

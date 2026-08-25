@@ -44,6 +44,7 @@ def generate_all_summaries(
     model: str | None = None,
     base_url: str | None = None,
     max_workers: int | None = None,
+    timeout: float | None = None,
     progress=None,
     task_id=None
 ) -> tuple[List[Dict[str, Any]], List[SummaryFailure]]:
@@ -84,12 +85,14 @@ def generate_all_summaries(
                     provider=provider,
                     model_name=model,
                     base_url=base_url,
+                    timeout=timeout,
                 )
             else:
                 summary = summarize_file(
                     file_path=file_path,
                     language=lang,
                     content=doc["content"],
+                    timeout=timeout,
                 )
             with summaries_lock:
                 summaries.append(summary)
@@ -146,6 +149,7 @@ def generate_hierarchical_summaries(
     provider: str | None = None,
     model: str | None = None,
     base_url: str | None = None,
+    timeout: float | None = None,
     progress=None,
     task_id=None
 ) -> List[Dict[str, Any]]:
@@ -195,7 +199,8 @@ def generate_hierarchical_summaries(
             contents_summaries=contents,
             provider=provider,
             model_name=model,
-            base_url=base_url
+            base_url=base_url,
+            timeout=timeout,
         )
         
         if progress and task_id is not None:

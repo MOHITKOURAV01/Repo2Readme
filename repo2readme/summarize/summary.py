@@ -5,6 +5,7 @@ import logging
 import os
 from langchain_core.output_parsers import JsonOutputParser
 from repo2readme.llm.factory import create_llm
+from repo2readme.llm.timeouts import resolve_timeout
 from repo2readme.utils.retry import call_with_retry
 
 
@@ -76,11 +77,12 @@ def get_prompt_template_hash() -> str:
 
 
 def create_summarizer(file_path, language,
-    content,provider=None, model_name=None, base_url=None,):
+    content,provider=None, model_name=None, base_url=None, timeout=None,):
     model = create_llm(
         provider=provider or "groq",
         model=model_name,
         base_url=base_url,
+        timeout=resolve_timeout(timeout),
     )
     parser=JsonOutputParser()
     prompt = PromptTemplate(
@@ -100,9 +102,19 @@ def summarize_file(
     provider=None,
     model_name=None,
     base_url=None,
+    timeout=None,
 ):
+    """Summarize one file.
+
+    ``timeout`` is the user's ``--timeout`` in seconds: ``None`` for the
+    default, ``0`` for no deadline. Without one a hung connection held a
+    worker thread for as long as the process lived.
+    """
     try:
-        chain = create_summarizer(file_path, language, content, provider, model_name, base_url,)
+        chain = create_summarizer(
+            file_path, language, content, provider, model_name, base_url,
+            timeout=timeout,
+        )
         return call_with_retry(
             lambda: chain.invoke({
                 "file_path": file_path.replace("\\", "/"),
