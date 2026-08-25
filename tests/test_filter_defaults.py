@@ -262,7 +262,9 @@ def test_classify_returns_none_for_ordinary_source_files():
 
 def test_classify_distinguishes_the_three_categories():
     assert classify_default_ignore("node_modules/a.js") == "build_directory"
-    assert classify_default_ignore("__init__.py") == "ignored_file"
+    # __init__.py is no longer name-ignored: emptiness is decided from content
+    # in repo2readme.utils.triviality.
+    assert classify_default_ignore(".gitignore") == "ignored_file"
     assert classify_default_ignore("logo.png") == "ignored_extension"
 
 

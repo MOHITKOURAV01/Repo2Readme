@@ -13,6 +13,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Iterable, Optional
 
+from repo2readme.utils.triviality import SKIP_REASON as EMPTY_SKIP_REASON
+from repo2readme.utils.triviality import is_effectively_empty
 from repo2readme.utils.workers import resolve_worker_count
 
 from .stages import (
@@ -231,6 +233,18 @@ class TraversalPipeline:
 
             # Stage 5: Detect language
             language = detect_file_language(metadata, content)
+
+            # A file with nothing but whitespace and comments has no summary
+            # to give. Checked here rather than in the filter because it is a
+            # statement about content, and the content is already in hand -
+            # the name-based `__init__.py` rule this replaces removed every
+            # package's public API along with the empty markers it was aimed
+            # at.
+            if is_effectively_empty(content, language):
+                with self._lock:
+                    self._skipped.append((ff.relative_path, EMPTY_SKIP_REASON))
+                return EMPTY_SKIP_REASON
+
             metadata = FileMetadata(
                 absolute_path=metadata.absolute_path,
                 relative_path=metadata.relative_path,

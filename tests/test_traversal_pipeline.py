@@ -59,7 +59,7 @@ def nested_repo(tmp_path):
     for i in range(10):
         current = current / f"level{i}"
         current.mkdir()
-    (current / "leaf.py").write_text("# deep file", encoding="utf-8")
+    (current / "leaf.py").write_text("# deep file\nDEPTH = 1\n", encoding="utf-8")
     return str(repo)
 
 
@@ -182,7 +182,7 @@ class TestTraversalPipeline:
         repo = tmp_path / "det_order"
         repo.mkdir()
         for name in ["a.py", "b.py", "c.py", "d.py"]:
-            (repo / name).write_text(f"# {name}", encoding="utf-8")
+            (repo / name).write_text(f"# {name}\nvalue = 1\n", encoding="utf-8")
         pipeline = TraversalPipeline(str(repo), max_workers=4)
         docs1, _ = pipeline.run()
         docs2, _ = pipeline.run()
@@ -219,7 +219,7 @@ class TestTraversalPipeline:
         repo = tmp_path / "concurrent"
         repo.mkdir()
         for i in range(50):
-            (repo / f"file_{i:03d}.py").write_text(f"# file {i}", encoding="utf-8")
+            (repo / f"file_{i:03d}.py").write_text(f"# file {i}\nvalue = {i}\n", encoding="utf-8")
         pipeline = TraversalPipeline(str(repo), max_workers=8)
         documents, ctx = pipeline.run()
         assert len(documents) == 50
@@ -245,7 +245,7 @@ class TestTraversalPipeline:
         repo = tmp_path / "thousands"
         repo.mkdir()
         for i in range(1000):
-            (repo / f"file_{i:04d}.py").write_text(f"# file {i}", encoding="utf-8")
+            (repo / f"file_{i:04d}.py").write_text(f"# file {i}\nvalue = {i}\n", encoding="utf-8")
         pipeline = TraversalPipeline(str(repo), max_workers=8)
         documents, ctx = pipeline.run()
         assert len(documents) == 1000
@@ -435,10 +435,14 @@ class TestTraversalPipeline:
         (repo / "small.py").write_text("x", encoding="utf-8")
         pipeline = TraversalPipeline(str(repo), max_file_size_kb=0)
         documents, ctx = pipeline.run()
-        assert len(documents) == 1
-        assert documents[0].metadata["relative_path"] == "empty.py"
-        skipped_paths = [s[0] for s in ctx.skipped]
-        assert "small.py" in skipped_paths
+
+        # A zero-byte file is the only thing a 0 KB limit lets through, and it
+        # is then dropped for having no content rather than for its size - so
+        # neither file is summarized, but for different reasons.
+        assert documents == []
+        reasons = dict(ctx.skipped)
+        assert reasons["empty.py"] == "no readable content"
+        assert reasons["small.py"].startswith("exceeds maximum file size")
 
     @patch("repo2readme.utils.filter.is_file_size_allowed")
     def test_stat_failure_does_not_crash_traversal(
@@ -705,7 +709,7 @@ class TestProgressCallbacks:
     def test_callback_exception_does_not_prevent_completion(self, tmp_path):
         repo = tmp_path / "cb_error2"
         repo.mkdir()
-        files = [(f"f{i:02d}.py", "#") for i in range(5)]
+        files = [(f"f{i:02d}.py", f"value = {i}\n") for i in range(5)]
         for name, content in files:
             (repo / name).write_text(content, encoding="utf-8")
 

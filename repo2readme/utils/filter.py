@@ -78,11 +78,22 @@ IGNORE_DIR_PATTERNS = (
 # keep working.
 IGNORE_DIRS = NESTED_IGNORE_DIRS | ROOT_IGNORE_DIRS
 
+# ``__init__.py`` used to be listed here. It is a name-based approximation of
+# "don't spend a request on an empty marker file", and it removed every
+# package's public API - the re-exports, ``__all__``, ``__version__``, the
+# package docstring - from the analysis. It also made the dependency graph's
+# package resolution unreachable: every candidate it builds ends in
+# ``__init__.py``, and no such path was ever in the file map, so `import pkg`
+# and `from . import x` could never resolve.
+#
+# The rule it was standing in for now lives in
+# ``repo2readme.utils.triviality``, applied to content rather than to a name,
+# so an empty marker still costs nothing and an `__init__.py` that defines the
+# API is read.
 IGNORE_FILES = {
     "package-lock.json",
     "yarn.lock",
     "pnpm-lock.yaml",
-    "__init__.py",
     ".env",
     ".env.local",
     ".env.development",

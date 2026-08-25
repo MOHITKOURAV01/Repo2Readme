@@ -137,6 +137,25 @@ Two groups, because the names behave differently:
 `pkg/` and `packages/` are not ignored at all: in a checked-out repository they
 are the standard Go project layout and a JavaScript monorepo's workspace root.
 
+### Files with no content
+
+A file is skipped when nothing is left of it once whitespace and comments are
+removed, with the reason `no readable content`. An empty `__init__.py`, a
+`conftest.py` that only marks a directory, a `.js` holding one license header —
+none of them has a summary to give, and each would otherwise cost a request.
+
+The check is made on content, not on the name, and the language decides what
+counts as a comment. A docstring is content: an `__init__.py` whose whole body
+is `"""Order service."""` is analyzed, and so is a `README.md` containing a
+single `# Heading`, since `#` opens a heading in Markdown rather than a
+comment.
+
+`__init__.py` used to be ignored by name instead. That removed every package's
+public API — the re-exports, `__all__`, `__version__`, the package docstring —
+and it also meant `import mypkg` and `from . import routes` could never be
+resolved in the Dependency Overview, because the file those imports resolve to
+was never read.
+
 ### Environment files
 
 Every `.env*` file is skipped by default — not only the common names, but

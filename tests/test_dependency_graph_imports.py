@@ -287,3 +287,89 @@ class TestGraphFromRelativeImports:
             "/repo/src/polyfill.js"
         }
         assert graph.get_dependencies("/repo/src/api.js") == {"/repo/src/models.js"}
+
+
+# ---------------------------------------------------------------------------
+# Package resolution, end to end through the loader
+# ---------------------------------------------------------------------------
+#
+# Every candidate _resolve_python_import builds for a package ends in
+# __init__.py, and the loader's default ignore rules dropped every one of
+# them - so `import pkg` and `from . import x` could not resolve in any real
+# repository, however correct the resolver was. These tests go through the
+# loader rather than hand-built documents, which is the only way that class of
+# regression is visible.
+
+
+def _graph_for(root):
+    from repo2readme.dependency_graph import build_dependency_graph
+    from repo2readme.loaders.loader import LocalRepoLoader
+
+    documents, _ = LocalRepoLoader(str(root)).load()
+    graph = build_dependency_graph(
+        [{"content": d.page_content, "metadata": d.metadata} for d in documents]
+    )
+    return graph, {d.metadata["relative_path"]: d.metadata["file_path"] for d in documents}
+
+
+def test_importing_a_package_resolves_to_its_init(tmp_path):
+    pkg = tmp_path / "app"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("VERSION = '1.0'\n", encoding="utf-8")
+    (tmp_path / "main.py").write_text("import app\n\nprint(app.VERSION)\n", encoding="utf-8")
+
+    graph, paths = _graph_for(tmp_path)
+
+    assert paths["app/__init__.py"] in graph.get_dependencies(paths["main.py"])
+
+
+def test_from_dot_import_resolves_to_the_sibling_module(tmp_path):
+    pkg = tmp_path / "app"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("from . import routes\n", encoding="utf-8")
+    (pkg / "routes.py").write_text("def index():\n    return {}\n", encoding="utf-8")
+
+    graph, paths = _graph_for(tmp_path)
+
+    assert paths["app/routes.py"] in graph.get_dependencies(paths["app/__init__.py"])
+
+
+def test_from_package_import_module_resolves_through_a_nested_package(tmp_path):
+    api = tmp_path / "app" / "api"
+    api.mkdir(parents=True)
+    (tmp_path / "app" / "__init__.py").write_text(
+        "from app.api import routes\n", encoding="utf-8"
+    )
+    (api / "__init__.py").write_text("from . import routes\n", encoding="utf-8")
+    (api / "routes.py").write_text("def index():\n    return {}\n", encoding="utf-8")
+
+    graph, paths = _graph_for(tmp_path)
+
+    deps = graph.get_dependencies(paths["app/__init__.py"])
+    assert paths["app/api/routes.py"] in deps
+
+
+def test_a_package_with_dependents_is_not_reported_as_isolated(tmp_path):
+    pkg = tmp_path / "app"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("VERSION = '1.0'\n", encoding="utf-8")
+    (tmp_path / "main.py").write_text("import app\n\nprint(app.VERSION)\n", encoding="utf-8")
+
+    graph, paths = _graph_for(tmp_path)
+
+    assert paths["app/__init__.py"] not in graph.get_isolated_files()
+    assert paths["app/__init__.py"] not in graph.get_entry_points()
+
+
+def test_an_empty_init_does_not_break_resolution_of_its_siblings(tmp_path):
+    """The marker file is skipped; the modules beside it still resolve."""
+    pkg = tmp_path / "app"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "routes.py").write_text("from app import models\n", encoding="utf-8")
+    (pkg / "models.py").write_text("class Order:\n    pass\n", encoding="utf-8")
+
+    graph, paths = _graph_for(tmp_path)
+
+    assert "app/__init__.py" not in paths
+    assert paths["app/models.py"] in graph.get_dependencies(paths["app/routes.py"])
