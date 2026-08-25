@@ -1,6 +1,7 @@
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from repo2readme.llm.factory import create_llm
+from repo2readme.utils.content_budget import apply_content_budget
 from repo2readme.utils.retry import call_with_retry
 import json
 import logging
@@ -31,7 +32,7 @@ Return ONLY JSON.
 {format_instructions}
 """
 
-def summarize_directory(dir_path, contents_summaries, provider=None, model_name=None, base_url=None):
+def summarize_directory(dir_path, contents_summaries, provider=None, model_name=None, base_url=None, max_content_chars=None):
     model = create_llm(
         provider=provider or "groq",
         model=model_name,
@@ -45,7 +46,12 @@ def summarize_directory(dir_path, contents_summaries, provider=None, model_name=
     )
     chain = prompt | model | parser
     try:
-        contents_str = json.dumps(contents_summaries, indent=2)
+        # json.dumps of every summary below this directory grows with the
+        # number of files in it, so the roll-up has the same unbounded-request
+        # shape a single large file had.
+        contents_str = apply_content_budget(
+            json.dumps(contents_summaries, indent=2), max_content_chars
+        ).text
         return call_with_retry(
             lambda: chain.invoke({
                 "dir_path": dir_path,

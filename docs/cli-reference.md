@@ -23,6 +23,7 @@ repo2readme run [OPTIONS]
 | `--dry-run` | | Preview the analysis (repo tree, token estimate, files to be processed) without making any API calls or requiring API keys. |
 | `--include <PATTERN>` | | Glob pattern for files to include, even if normally filtered out. Can be passed multiple times. |
 | `--exclude <PATTERN>` | | Glob pattern for files to exclude. Can be passed multiple times. |
+| `--max-content-chars <N>` | | Characters of a file to send in one request. Defaults to 40000. `0` sends files whole. |
 | `--max-file-size-kb <N>` | | Skip files larger than N KB. |
 | `--provider <NAME>` | | LLM provider to use. See `repo2readme providers`. |
 | `--model <NAME>` | | Model name. Defaults to the selected provider's default model. |
@@ -105,6 +106,44 @@ at the number of files. This applies to both `--local` and `--url` runs.
 ```bash
 repo2readme run --url https://github.com/user/repo --max-workers 8
 ```
+
+### `--max-content-chars`
+
+How much of a file to put in one request. Defaults to 40,000 characters —
+roughly 13,000 tokens, which leaves room for the prompt and the answer inside a
+16k context window.
+
+A longer file is sent as its head and its tail with the middle replaced by a
+marker:
+
+```
+line 0: def build_client():
+...
+... 7,891 line(s) omitted from the middle ...
+
+    return Client(session)
+```
+
+Imports and module docstrings live at the top, the public entry points and the
+`main` guard at the bottom, so the two ends carry most of what a summary needs.
+The cut is always made on line boundaries, so the excerpt is never spliced
+through the middle of a statement, and the summary records `"truncated": true`
+along with how many lines were left out.
+
+```bash
+repo2readme run --local . --max-content-chars 80000   # a large context window
+repo2readme run --local . --max-content-chars 0       # send files whole
+```
+
+Without a budget, a file just under `--max-file-size-kb` went to the model in
+one piece — around 200 KB, or 60–70 thousand tokens. Most providers reject that
+outright, and the rejection is classified as permanent (retrying an identical
+oversized request cannot succeed), so the file was dropped from the run after
+being paid for. Lowering `--max-file-size-kb` is not the same fix: it drops the
+same file earlier instead of describing it.
+
+The budget is part of the cache key, so changing it re-summarizes the files it
+affects.
 
 ### `--respect-gitignore`
 

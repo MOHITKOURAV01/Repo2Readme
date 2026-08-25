@@ -192,15 +192,17 @@ class SummaryCache:
         os.makedirs(self.cache_dir, exist_ok=True)
 
     def _compute_config_hash(self) -> str:
-        config_str = json.dumps(
-            {
-                "provider": self.config.get("provider"),
-                "model": self.config.get("model"),
-                "base_url": self.config.get("base_url"),
-                "prompt_template_hash": self.prompt_template_hash,
-            },
-            sort_keys=True,
-        )
+        """Hash everything that changes what a summary would say.
+
+        The three keys used to be listed here by name, so a new dimension -
+        ``max_content_chars``, which decides how much of a file the model was
+        shown - could be added to the config and silently not invalidate
+        anything, leaving entries written under a different budget looking
+        valid. The whole config is hashed instead.
+        """
+        payload = dict(self.config or {})
+        payload["prompt_template_hash"] = self.prompt_template_hash
+        config_str = json.dumps(payload, sort_keys=True, default=str)
         return hashlib.sha256(config_str.encode()).hexdigest()
 
     @staticmethod

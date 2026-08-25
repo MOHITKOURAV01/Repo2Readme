@@ -33,6 +33,11 @@ from repo2readme.services.summarization import generate_all_summaries, generate_
 from repo2readme.services.orchestrator import ReadmeGenerationError, run_pipeline
 from repo2readme.services.reporting import partition_summaries, render_report
 from repo2readme.utils.workers import validate_max_workers
+from repo2readme.utils.content_budget import (
+    DEFAULT_MAX_CONTENT_CHARS,
+    InvalidContentBudgetError,
+    validate_max_content_chars,
+)
 
 
 def validate_max_workers_option(ctx, param, value):
@@ -45,6 +50,14 @@ def validate_max_workers_option(ctx, param, value):
     try:
         return validate_max_workers(value)
     except ValueError as e:
+        raise click.BadParameter(str(e), ctx=ctx, param=param) from e
+
+
+def validate_max_content_chars_option(ctx, param, value):
+    """Reject an unusable --max-content-chars before the repository is loaded."""
+    try:
+        return validate_max_content_chars(value)
+    except InvalidContentBudgetError as e:
         raise click.BadParameter(str(e), ctx=ctx, param=param) from e
 
 
@@ -125,6 +138,17 @@ def main():
     help="Number of parallel worker threads for file processing (default: 4, capped at file count)",
 )
 @click.option(
+    "--max-content-chars",
+    default=DEFAULT_MAX_CONTENT_CHARS,
+    show_default=True,
+    type=int,
+    callback=validate_max_content_chars_option,
+    help=(
+        "Characters of a file to send in one request. Longer files are sent as "
+        "head and tail with the middle marked as omitted. Use 0 to send whole files."
+    ),
+)
+@click.option(
     "--provider",
     default=None,
     help=f"LLM provider ({provider_choices_help()}). Run 'repo2readme providers' for details.",
@@ -146,7 +170,7 @@ def main():
     show_default=True,
     help="Branch to clone when using --url.",
 )
-def run(url, local, output, force, backup, create_dirs, include_patterns, exclude_patterns, max_file_size_kb, dry_run, strict, respect_gitignore, max_workers, provider, model, base_url, branch):
+def run(url, local, output, force, backup, create_dirs, include_patterns, exclude_patterns, max_file_size_kb, dry_run, strict, respect_gitignore, max_workers, max_content_chars, provider, model, base_url, branch):
     """ Use --url for GitHub repo url and --local for local repo
     """
     if not url and not local:
@@ -175,6 +199,9 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
         "provider": provider,
         "model": model,
         "base_url": base_url,
+        # The budget decides how much of a file the model was shown, so a
+        # summary written under one is not valid under another.
+        "max_content_chars": max_content_chars,
     }
     # autosave=False batches the writes: the whole cache file has to be
     # rewritten for any change, so saving once per summarized file made a run
@@ -289,6 +316,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
                 model=model,
                 base_url=base_url,
                 max_workers=max_workers,
+                max_content_chars=max_content_chars,
                 progress=progress,
                 task_id=task
             )
@@ -313,6 +341,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
                 provider=provider,
                 model=model,
                 base_url=base_url,
+                max_content_chars=max_content_chars,
                 progress=progress,
                 task_id=rollup_task
             )

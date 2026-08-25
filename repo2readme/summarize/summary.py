@@ -5,6 +5,7 @@ import logging
 import os
 from langchain_core.output_parsers import JsonOutputParser
 from repo2readme.llm.factory import create_llm
+from repo2readme.utils.content_budget import annotate_truncation, apply_content_budget
 from repo2readme.utils.retry import call_with_retry
 
 
@@ -100,17 +101,40 @@ def summarize_file(
     provider=None,
     model_name=None,
     base_url=None,
+    max_content_chars=None,
 ):
+    """Summarize one file, sending at most ``max_content_chars`` of it.
+
+    A file just under ``--max-file-size-kb`` is 60-70 thousand tokens in one
+    request, which the provider rejects as too large - a rejection the retry
+    correctly refuses to repeat, so the file was dropped from the run after
+    being paid for. It is cut to the budget instead, head and tail, with the
+    gap marked, and the summary records that it describes an excerpt.
+    """
+    budgeted = apply_content_budget(content, max_content_chars)
+
+    if budgeted.truncated:
+        logger.info(
+            "%s is %d lines; sending the first and last %d, omitting %d",
+            file_path,
+            budgeted.original_lines,
+            budgeted.original_lines - budgeted.omitted_lines,
+            budgeted.omitted_lines,
+        )
+
     try:
-        chain = create_summarizer(file_path, language, content, provider, model_name, base_url,)
-        return call_with_retry(
+        chain = create_summarizer(
+            file_path, language, budgeted.text, provider, model_name, base_url,
+        )
+        summary = call_with_retry(
             lambda: chain.invoke({
                 "file_path": file_path.replace("\\", "/"),
                 "language": language,
-                "content": content
+                "content": budgeted.text
             }),
             description=f"summary for {file_path}",
         )
+        return annotate_truncation(summary, budgeted)
     except Exception as e:
         logger.warning("Summary error for %s: %s", file_path, e)
         return {"file_path": file_path, "error": str(e)}

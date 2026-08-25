@@ -82,6 +82,24 @@ Authentication failures, unsupported providers and context-length errors are
 never retried — retrying cannot fix them, and failing immediately tells you
 what is actually wrong.
 
+## A large file is missing from the README
+
+Two rules can remove it, and they say different things in `--dry-run`:
+
+* `exceeds maximum file size` — the file was never read. Raise
+  `--max-file-size-kb` (default 200).
+* Nothing at all — the file was read, but it is longer than
+  `--max-content-chars`, so the model saw its head and its tail with the middle
+  marked as omitted. The summary carries `"truncated": true`.
+
+Raise `--max-content-chars` if your provider has the context window for it, or
+set it to `0` to send whole files.
+
+Before the budget existed, a file just under the size limit was sent in one
+piece and rejected with a 413 or a context-length error, which is not
+retryable — so it was dropped from the run entirely and appeared only in the
+failure report.
+
 ## Generated README looks incomplete or low quality
 
 The tool iterates internally until the reviewer agent scores the draft 8.5+ or a max iteration count is hit. If quality is still off, check that your repo's key files (entry points, config, core logic) aren't being filtered out — run with `--dry-run` to confirm they're in the "Files to be processed" list.
