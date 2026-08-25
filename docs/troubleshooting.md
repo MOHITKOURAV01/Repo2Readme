@@ -18,6 +18,40 @@ An existing README is never truncated before the new one is complete: the write
 goes to a temporary file and is renamed into place. Use `--backup` to keep a
 `.bak` copy of what was replaced.
 
+## "No files were found" / "All N file(s) ... were skipped"
+
+The run stops before the confirmation prompt, with exit code 1, when the
+traversal produced nothing to summarize. Nothing is written and no API request
+is made.
+
+A README generated from zero summaries is a README the model invented, so this
+is deliberately a failure rather than a small run.
+
+The message names the categories responsible and, where a flag can change the
+outcome, what to reach for:
+
+```
+All 34 file(s) found under /repo were skipped, so there is nothing to summarize.
+
+ignored by default rules : 28
+excluded by --exclude    :  6
+
+Use --include to override the built-in ignore rules for the paths you need.
+Loosen or drop the --exclude pattern.
+```
+
+Common causes:
+
+| Category | What to do |
+| --- | --- |
+| `excluded by --exclude` | Loosen or drop the pattern. Patterns match case-insensitively against the repository-relative path *and* the basename. |
+| `ignored by default rules` | The built-in ignore list covers build output, lock files and data extensions. Override it per path with `--include`. |
+| `over --max-file-size-kb` | Raise the limit (default 200). |
+| `ignored by .gitignore` | Drop `--respect-gitignore`. |
+| `binary content` | Detected from the file's bytes, not its extension. Nothing to do — these are genuinely not summarizable. |
+
+Run with `--dry-run` to see every skipped path rather than the counts.
+
 ## "Missing API key" or repeated key prompts
 
 Your keys may not be saved correctly. Try setting them as environment variables instead:

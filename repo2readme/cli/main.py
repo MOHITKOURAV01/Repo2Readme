@@ -9,7 +9,6 @@ from rich.progress import Progress
 from rich.table import Table
 from repo2readme.config import reset_api_keys
 import os
-from collections import Counter
 
 from repo2readme import __version__
 from repo2readme.utils.logging_config import logging_options
@@ -31,6 +30,11 @@ from repo2readme.services.environment import setup_api_keys
 from repo2readme.services.estimation import format_size, estimate_analysis_cost
 from repo2readme.services.summarization import generate_all_summaries, generate_hierarchical_summaries
 from repo2readme.services.orchestrator import ReadmeGenerationError, run_pipeline
+from repo2readme.services.preflight import (
+    build_skip_summary_lines,
+    check_analysis_not_empty,
+    render_empty_analysis,
+)
 from repo2readme.services.reporting import partition_summaries, render_report
 from repo2readme.utils.workers import validate_max_workers
 
@@ -199,11 +203,12 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
                 max_workers=max_workers,
                 branch=branch,
             )
-            if dry_run:
-                files, root_path, loader_obj, skipped = loader.load(return_skip_info=True)
-            else:
-                files, root_path, loader_obj = loader.load()
-                skipped = []
+            # Skip information is collected by the traversal either way, and
+            # a normal run needs it too: it is the only thing that can explain
+            # an empty analysis in terms of the flag responsible.
+            files, root_path, loader_obj, skipped = loader.load(
+                return_skip_info=True
+            )
         except Exception as e:
             rprint(f"[red]Failed to load repository: {e}[/red]")
             return
@@ -230,6 +235,16 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
 
     estimated_tokens, total_size_bytes, total_documents = estimate_analysis_cost(documents)
 
+    # An empty analysis is a dead end, not a run with a small bill: the README
+    # stage would be handed no summaries at all and would answer with an
+    # invented project, written over whatever --output points at.
+    empty = check_analysis_not_empty(root_path, total_documents, skipped)
+    if empty is not None and not dry_run:
+        render_empty_analysis(empty, rprint)
+        if hasattr(loader_obj, "cleanup"):
+            loader_obj.cleanup()
+        raise SystemExit(1)
+
     if dry_run:
         rprint("\n[bold]Repository Tree[/bold]\n")
         rprint(tree)
@@ -237,24 +252,14 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
         for doc in documents:
             rel_path = doc["metadata"].get("relative_path", "")
             rprint(f"✓ [green]{rel_path}[/green]")
-        if skipped:
-            skip_reasons = Counter()
-            for _, reason in skipped:
-                skip_reasons[reason] += 1
-            rprint("\n[bold]Skipped Files Summary[/bold]\n")
-            reason_order = ["excluded by pattern", "ignored by default rules", "exceeds maximum file size", "protected large file"]
-            printed = set()
-            for reason in reason_order:
-                if reason in skip_reasons:
-                    printed.add(reason)
-                    rprint(f"{reason:30s}: {skip_reasons[reason]}")
-            for reason in sorted(skip_reasons):
-                if reason not in printed:
-                    rprint(f"{reason:30s}: {skip_reasons[reason]}")
+        for line in build_skip_summary_lines(skipped):
+            rprint(line)
         rprint("\n[bold]Repository Analysis[/bold]\n")
         rprint(f"Files selected     : {total_documents}")
         rprint(f"Estimated tokens   : ~{estimated_tokens:,}")
         rprint(f"Request size       : ~{format_size(total_size_bytes)}")
+        if empty is not None:
+            render_empty_analysis(empty, rprint, suggest_dry_run=False)
         rprint("\n[green]Dry run complete.[/green]")
         rprint("[yellow]No API requests were made.[/yellow]")
         if hasattr(loader_obj, "cleanup"):
@@ -299,7 +304,10 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
         failures.extend(errors)
         render_report(total_documents, len(successful_summaries), failures, rprint)
 
-        if total_documents and not successful_summaries:
+        if not successful_summaries:
+            # No count in the condition: "nothing usable came back" is the same
+            # failure whether the denominator is zero or not, and reading it as
+            # falsy is what let an empty run through in the first place.
             rprint(
                 "\n[red]Every file failed to summarize, so there is nothing to "
                 "generate a README from.[/red]"

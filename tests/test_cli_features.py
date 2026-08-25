@@ -70,8 +70,10 @@ def test_dry_run_shows_skipped_files(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert "Skipped Files Summary" in result.output
-    assert "excluded by pattern" in result.output
-    assert "exceeds maximum file size" in result.output
+    # Reasons are reported by category now: the raw ones embed the measured
+    # size, so each oversized file produced a row of its own.
+    assert "excluded by --exclude" in result.output
+    assert "over --max-file-size-kb" in result.output
     assert "ignored by default rules" in result.output
 
 def test_dry_run_shows_unknown_skip_reasons(monkeypatch, tmp_path):
@@ -101,7 +103,8 @@ def test_dry_run_shows_unknown_skip_reasons(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert "Skipped Files Summary" in result.output
-    assert "excluded by pattern" in result.output
+    assert "excluded by --exclude" in result.output
+    # An unrecognised reason keeps its own text rather than being bucketed.
     assert "my custom reason" in result.output
 
 
