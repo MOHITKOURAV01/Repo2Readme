@@ -10,20 +10,7 @@ class ReviewSchema(BaseModel):
     score:float=Field(description="A score between 1 and 10 based on the quality of the README")
     feedback:str=Field(description="Actionable comment how to improve the README")
 
-def readme_reviewer(
-    readme: str,
-    provider: str | None = None,
-    model_name: str | None = None,
-    base_url: str | None = None,
-):
-    model = create_llm(
-        provider=provider or "google",
-        model=model_name,
-        base_url=base_url,
-    )
-    parser=PydanticOutputParser(pydantic_object=ReviewSchema)
-    review_prompt=PromptTemplate(
-        template="""
+REVIEW_PROMPT_TEMPLATE = """
 You are a senior technical writer and software engineer acting as a README reviewer.
 
 Your job is to Review the following README and do two tasks:
@@ -43,7 +30,23 @@ Return ONLY JSON in this format:
 
 
 
-    """,
+    """
+
+
+def readme_reviewer(
+    readme: str,
+    provider: str | None = None,
+    model_name: str | None = None,
+    base_url: str | None = None,
+):
+    model = create_llm(
+        provider=provider or "google",
+        model=model_name,
+        base_url=base_url,
+    )
+    parser=PydanticOutputParser(pydantic_object=ReviewSchema)
+    review_prompt=PromptTemplate(
+        template=REVIEW_PROMPT_TEMPLATE,
     input_variables=['readme'],
     partial_variables={"format_instructions":parser.get_format_instructions()}
     )

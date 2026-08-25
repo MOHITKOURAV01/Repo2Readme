@@ -43,6 +43,37 @@ pip install repo2readme
 python -m repo2readme --help
 ```
 
+## Reading the cost estimate
+
+Both `--dry-run` and the confirmation prompt print the same per-stage
+breakdown:
+
+```
+Files selected     : 81  (67 to summarize, 14 cached)
+Source size        : ~643.6 KB
+
+Stage                      Requests       ~Tokens
+File summaries                   67       250,000
+Directory roll-ups               14        38,000
+README generation (max)           3        27,000
+README review (max)               3         6,000
+-----------------------   ---------   -----------
+Total (upper bound)              87       321,000
+```
+
+* **Cached files are excluded** from the summary stage, because they make no
+  request. They are still counted in the roll-up, which needs their summaries.
+* **`(max)`** marks the two stages whose count is an upper bound: the README
+  loop stops early once the reviewer scores a draft at 8.5 or better, so a run
+  often uses fewer than three rounds.
+* **The roll-up only appears above 15 files.** Below that the file summaries go
+  to the README prompt as they are.
+* **The totals are rounded** — every figure here comes from a bytes-per-token
+  approximation, and printing it to the last digit would be false precision.
+
+On a small repository the README loop, not the file count, is usually most of
+the bill: its prompt carries every summary and is sent up to three times.
+
 ## Token estimate looks too high / request is too large
 
 Use `--dry-run` first to check exactly which files will be sent, then narrow things down with `--exclude` or `--max-file-size-kb`:
@@ -51,6 +82,9 @@ Use `--dry-run` first to check exactly which files will be sent, then narrow thi
 repo2readme run --local ./my-project --dry-run
 repo2readme run --local ./my-project --exclude "tests/*" --max-file-size-kb 100
 ```
+
+A second run over an unchanged repository is much cheaper: every file is a
+cache hit, and the estimate says so.
 
 ## Rate limit errors (HTTP 429) on large repositories
 

@@ -350,50 +350,83 @@ class SummaryCache:
     # Public API
     # ------------------------------------------------------------------
 
+    def _lookup(
+        self, file_path: str, content: str, language: str
+    ) -> tuple[str, Optional[dict]]:
+        """
+        Classify a lookup without changing anything. Caller must hold ``_lock``.
+
+        Returns ``(status, entry)`` where status is one of ``"config-changed"``,
+        ``"schema-changed"``, ``"miss"`` or ``"hit"``. Both :meth:`get` and
+        :meth:`contains` go through here so the two can never disagree about
+        what counts as a valid entry.
+        """
+        self._load()
+
+        if self._data.get("config_hash") != self._compute_config_hash():
+            return "config-changed", None
+
+        if self._data.get("schema_version") != self.schema_version:
+            return "schema-changed", None
+
+        entry = self._find_entry(file_path)
+        if entry is None:
+            return "miss", None
+
+        if entry.get("content_hash") != self._compute_content_hash(content):
+            return "miss", entry
+
+        # Language mismatch could indicate detection logic changed
+        if entry.get("language") != language:
+            logger.debug(
+                "Language mismatch for %s: cached=%s, current=%s",
+                file_path,
+                entry.get("language"),
+                language,
+            )
+            return "miss", entry
+
+        return "hit", entry
+
+    def contains(self, file_path: str, content: str, language: str) -> bool:
+        """
+        Whether a valid entry exists, without touching anything.
+
+        No hit or miss is counted, no invalidation is performed and nothing is
+        written. That matters for the pre-run cost estimate, which asks about
+        every file before the user has agreed to the run: answering with
+        :meth:`get` would leave the counters describing an estimate rather than
+        the run, and a configuration change would rewrite the cache file on the
+        strength of a question.
+        """
+        with self._lock:
+            status, _ = self._lookup(file_path, content, language)
+            return status == "hit"
+
     def get(self, file_path: str, content: str, language: str) -> Optional[dict]:
         """
         Return cached summary if valid, otherwise None.
         """
         with self._lock:
-            self._load()
+            status, entry = self._lookup(file_path, content, language)
 
-            # Invalidate if configuration changed
-            current_config_hash = self._compute_config_hash()
-            if self._data.get("config_hash") != current_config_hash:
+            if status == "config-changed":
                 logger.info("Configuration changed, invalidating cache")
-                self._clear_entries(current_config_hash)
+                self._clear_entries(self._compute_config_hash())
                 self._stats["misses"] += 1
                 return None
 
-            # Invalidate if schema version changed
-            if self._data.get("schema_version") != self.schema_version:
+            if status == "schema-changed":
                 logger.info(
                     "Cache schema version changed from %s to %s, invalidating cache",
                     self._data.get("schema_version"),
                     self.schema_version,
                 )
-                self._clear_entries(current_config_hash)
+                self._clear_entries(self._compute_config_hash())
                 self._stats["misses"] += 1
                 return None
 
-            entry = self._find_entry(file_path)
-            if entry is None:
-                self._stats["misses"] += 1
-                return None
-
-            content_hash = self._compute_content_hash(content)
-            if entry.get("content_hash") != content_hash:
-                self._stats["misses"] += 1
-                return None
-
-            # Language mismatch could indicate detection logic changed
-            if entry.get("language") != language:
-                logger.debug(
-                    "Language mismatch for %s: cached=%s, current=%s",
-                    file_path,
-                    entry.get("language"),
-                    language,
-                )
+            if status == "miss":
                 self._stats["misses"] += 1
                 return None
 

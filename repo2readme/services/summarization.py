@@ -114,6 +114,51 @@ def generate_all_summaries(
                 
     return summaries, errors
 
+# Below this many files the summaries go to the README prompt as they are, and
+# no directory roll-up happens at all.
+ROLLUP_THRESHOLD = 15
+
+
+def count_directory_rollups(file_paths: List[str]) -> tuple[int, int]:
+    """How many ``summarize_directory`` calls a set of files will cause.
+
+    Returns ``(calls, items_carried)``: the number of requests, and the total
+    number of summaries those requests carry between them - the roll-up prompt
+    embeds the JSON of everything in the directory, so the second number is
+    what the cost is actually proportional to.
+
+    This walks the same tree :func:`generate_hierarchical_summaries` walks and
+    applies the same two rules it applies - a directory with one entry is
+    passed through rather than summarized, and the root is never summarized -
+    so an estimate built from it cannot drift from the run.
+    """
+    if len(file_paths) <= ROLLUP_THRESHOLD:
+        return 0, 0
+
+    tree = build_directory_tree([{"file_path": path} for path in file_paths])
+
+    def walk(node: Dict[str, Any]) -> tuple[int, int, int]:
+        calls = 0
+        carried = 0
+        contents = 0
+        for child in node["children"].values():
+            child_calls, child_carried, child_contents = walk(child)
+            calls += child_calls
+            carried += child_carried
+            contents += child_contents
+        contents += len(node["files"])
+
+        if node["path"] == ".":
+            return calls, carried, contents
+        if contents <= 1:
+            # Nothing to merge: the single entry is handed straight up.
+            return calls, carried, contents
+        return calls + 1, carried + contents, 1
+
+    calls, carried, _ = walk(tree)
+    return calls, carried
+
+
 def build_directory_tree(file_summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Builds a tree structure of the repository based on file paths.
@@ -152,7 +197,7 @@ def generate_hierarchical_summaries(
     """
     Rolls up file summaries into directory summaries recursively.
     """
-    if len(file_summaries) <= 15:
+    if len(file_summaries) <= ROLLUP_THRESHOLD:
         if progress and task_id is not None:
             progress.update(task_id, advance=1)
         return file_summaries

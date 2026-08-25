@@ -5,6 +5,11 @@ from repo2readme.readme.postprocess import postprocess_readme
 
 logger = logging.getLogger(__name__)
 
+# How many generate/review rounds the workflow may run. The loop also exits
+# early on a score of 8.5 or better, so this is an upper bound - which is what
+# makes it the right number for a cost estimate.
+MAX_README_ITERATIONS = 3
+
 
 class ReadmeGenerationError(RuntimeError):
     """The pipeline finished without producing a README worth writing.
@@ -44,7 +49,7 @@ def run_pipeline(
         "summaries": summaries,
         "tree_structure": tree,
         "iteration_no": 0,
-        "max_iterations": 3,
+        "max_iterations": MAX_README_ITERATIONS,
         'best_score': 0.0,
         "best_readme": "",
         "provider": provider,

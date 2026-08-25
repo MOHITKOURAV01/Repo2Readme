@@ -30,8 +30,10 @@ def test_dry_run_mode(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert "Repository Analysis" in result.output
     assert "Files selected     : 2" in result.output
-    # main.py length is 14 -> ~4 tokens. utils.py length is 27 -> ~9 tokens. Total tokens -> ~13
-    assert "Estimated tokens   : ~13" in result.output
+    # The estimate is a per-stage breakdown now: the source is a few tokens,
+    # but the two files still cost two summary requests plus the README loop.
+    assert "File summaries" in result.output
+    assert "Total (upper bound)" in result.output
     assert "Repository Tree" in result.output
     assert "Files to be processed" in result.output
     assert "✓ main.py" in result.output
@@ -123,7 +125,7 @@ def test_normal_run_user_declines(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert "Repository Analysis" in result.output
-    assert "Files to summarize : 1" in result.output
+    assert "Files selected     : 1" in result.output
     assert "Proceed?" in result.output
     assert "Operation cancelled." in result.output
 
@@ -167,7 +169,7 @@ def test_normal_run_user_confirms(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert "Repository Analysis" in result.output
-    assert "Files to summarize : 1" in result.output
+    assert "Files selected     : 1" in result.output
     assert "Proceed?" in result.output
     assert "Generating summaries..." in result.output
     assert "Generating README..." in result.output
@@ -216,7 +218,7 @@ def test_normal_run_force_bypasses_confirmation(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert "Repository Analysis" in result.output
-    assert "Files to summarize : 1" in result.output
+    assert "Files selected     : 1" in result.output
     assert "Proceed?" not in result.output # Should not prompt
     assert "Generating summaries..." in result.output
     assert "Generating README..." in result.output

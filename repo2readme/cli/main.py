@@ -28,7 +28,7 @@ from repo2readme.providers import PROVIDERS, provider_choices_help
 
 # Import new services
 from repo2readme.services.environment import setup_api_keys
-from repo2readme.services.estimation import format_size, estimate_analysis_cost
+from repo2readme.services.estimation import estimate_run, render_estimate
 from repo2readme.services.summarization import generate_all_summaries, generate_hierarchical_summaries
 from repo2readme.services.orchestrator import ReadmeGenerationError, run_pipeline
 from repo2readme.services.reporting import partition_summaries, render_report
@@ -228,7 +228,18 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
         [doc["metadata"].get("relative_path", "") for doc in documents],
     )
 
-    estimated_tokens, total_size_bytes, total_documents = estimate_analysis_cost(documents)
+    total_documents = len(documents)
+
+    # What the run will actually spend, not the size of the source: cache hits
+    # are excluded because they cost nothing, and the roll-up and README stages
+    # are counted because they are most of the bill on a small repository. The
+    # cache is consulted read-only, so asking does not disturb it.
+    estimate = estimate_run(
+        documents,
+        summary_cache=summary_cache,
+        tree=tree,
+        dependency_overview=dependency_overview,
+    )
 
     if dry_run:
         rprint("\n[bold]Repository Tree[/bold]\n")
@@ -251,10 +262,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
             for reason in sorted(skip_reasons):
                 if reason not in printed:
                     rprint(f"{reason:30s}: {skip_reasons[reason]}")
-        rprint("\n[bold]Repository Analysis[/bold]\n")
-        rprint(f"Files selected     : {total_documents}")
-        rprint(f"Estimated tokens   : ~{estimated_tokens:,}")
-        rprint(f"Request size       : ~{format_size(total_size_bytes)}")
+        render_estimate(estimate, rprint)
         rprint("\n[green]Dry run complete.[/green]")
         rprint("[yellow]No API requests were made.[/yellow]")
         if hasattr(loader_obj, "cleanup"):
@@ -262,10 +270,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
         return
 
     # Normal execution: print estimation first
-    rprint("\n[bold]Repository Analysis[/bold]\n")
-    rprint(f"Files to summarize : {total_documents}")
-    rprint(f"Estimated tokens   : ~{estimated_tokens:,}")
-    rprint(f"Request size       : ~{format_size(total_size_bytes)}")
+    render_estimate(estimate, rprint)
 
     try:
         if not force:

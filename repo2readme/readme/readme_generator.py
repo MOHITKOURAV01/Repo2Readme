@@ -5,24 +5,7 @@ from repo2readme.llm.factory import create_llm  # noqa: E402
 from repo2readme.utils.retry import call_with_retry  # noqa: E402
 
 
-def generate_readme(
-    summaries: List[str],
-    tree_structure: str,
-    feedback: List[str],
-    latest_readme: str,
-    provider: str,
-    model_name: str,
-    base_url: str,
-    dependency_overview: str = "",
-):
-    model = create_llm(
-        provider=provider or "groq",
-        model=model_name,
-        base_url=base_url,
-    )
-
-    prompt = PromptTemplate(
-        template="""
+README_PROMPT_TEMPLATE = """
 You are an expert README Generator and a Markdown file Specialist.
 Your task is to generate a cleaned, well-structured, professional README.md.
 
@@ -91,7 +74,27 @@ And You can also change the sections name as per the summaries.
 Return ONLY valid Markdown
 
 
-""",
+"""
+
+
+def generate_readme(
+    summaries: List[str],
+    tree_structure: str,
+    feedback: List[str],
+    latest_readme: str,
+    provider: str,
+    model_name: str,
+    base_url: str,
+    dependency_overview: str = "",
+):
+    model = create_llm(
+        provider=provider or "groq",
+        model=model_name,
+        base_url=base_url,
+    )
+
+    prompt = PromptTemplate(
+        template=README_PROMPT_TEMPLATE,
         input_variables=["summaries", "tree_structure", "latest_readme", "feedback", "dependency_overview"],
     )
 
