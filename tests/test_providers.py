@@ -141,11 +141,13 @@ class TestFactoryIntegration:
 
     def test_factory_covers_every_registered_provider(self):
         # Guards against registering a provider without a factory branch.
+        # Reads build_llm, which is where the branches live now that create_llm
+        # goes through the client cache.
         import inspect
 
         from repo2readme.llm import factory
 
-        source = inspect.getsource(factory.create_llm)
+        source = inspect.getsource(factory.build_llm)
         for spec in PROVIDERS:
             assert f'"{spec.name}"' in source, f"no factory branch for {spec.name}"
 
