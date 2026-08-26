@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from collections.abc import Iterable, Sequence
 from typing import Any
 
+from repo2readme.utils.console import safe
+
 # Provider errors can be several hundred characters of JSON. Keep the console
 # readable; the full text is still available in the returned failure objects.
 MAX_REASON_LENGTH = 140
@@ -139,10 +141,15 @@ def build_report_lines(
         "",
     ]
 
+    # The reason is the provider's own error text and the paths are file names;
+    # both routinely contain square brackets, which the console would otherwise
+    # read as style tags and delete.
     for group in group_failures(failures):
-        lines.append(f"[yellow]{group.count} file(s):[/yellow] {group.reason}")
+        lines.append(
+            f"[yellow]{group.count} file(s):[/yellow] {safe(group.reason)}"
+        )
         for path in group.file_paths[:max_paths_per_group]:
-            lines.append(f"    - {path}")
+            lines.append(f"    - {safe(path)}")
         remaining = group.count - max_paths_per_group
         if remaining > 0:
             lines.append(f"    ... and {remaining} more")

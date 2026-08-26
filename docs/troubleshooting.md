@@ -18,6 +18,23 @@ An existing README is never truncated before the new one is complete: the write
 goes to a temporary file and is renamed into place. Use `--backup` to keep a
 `.bak` copy of what was replaced.
 
+## The redirected README is missing square brackets, or wrapped mid-sentence
+
+This is fixed. Without `--output`, the README used to be printed through the
+console's markup renderer, which reads `[...]` as a style tag and renders to a
+fixed width. Redirecting it therefore produced a file with the brackets deleted
+and every long line broken in half:
+
+```bash
+repo2readme run --local . > README.md
+```
+
+The README is now written to stdout verbatim, so the redirect gives you exactly
+what the model produced — table of contents links, `[!NOTE]` callouts, array
+indices and all. The same applies to file paths that contain brackets, such as
+a Next.js `src/[id]/page.tsx` route, which used to disappear from the
+`--dry-run` listing.
+
 ## "Missing API key" or repeated key prompts
 
 Your keys may not be saved correctly. Try setting them as environment variables instead:
