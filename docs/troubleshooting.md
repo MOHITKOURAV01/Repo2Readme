@@ -130,6 +130,22 @@ a README stayed green when the clone had failed. See
 and `0` really does mean the README was generated (or that you declined a
 prompt).
 
+## Re-running produces a different README from an unchanged repository
+
+This is fixed. File summaries used to be collected in whichever order the
+worker threads finished, and that list goes straight into the generation
+prompt — so two runs over the same repository, with the same provider and model
+and even a fully warm cache, asked the model a differently ordered question and
+got a different answer back.
+
+Summaries and the directory roll-up now come back in repository order,
+independent of `--max-workers` and of how long any one file took. Re-running on
+an unchanged repository should now be a no-op diff, so `repo2readme` can be used
+to regenerate a checked-in README.
+
+Remaining sources of variation are the model itself (most providers sample) and
+anything that changed in the repository.
+
 ## Still stuck?
 
 Open an issue: https://github.com/agsaru/Repo2Readme/issues
