@@ -197,6 +197,27 @@ Dry run complete.
 No API requests were made.
 ```
 
+## Exit codes
+
+`repo2readme run` uses the conventional three statuses, so a script or a CI job
+can tell the outcomes apart without reading the output.
+
+| Status | Meaning | Examples |
+| --- | --- | --- |
+| `0` | The run did what was asked. Declining a prompt counts: you were asked and said no. | README generated; `Proceed? [y/N]` answered `n`; an existing file left in place |
+| `1` | The run was understood and could not be completed. | repository would not clone or load; API keys would not configure; every file failed to summarize; the README could not be generated or written; `--strict` with at least one failure |
+| `2` | The command line itself was wrong; nothing was attempted. | neither `--url` nor `--local` given; `--output` names a directory, or a parent that cannot be created; `--max-workers 0` |
+
+```bash
+if ! repo2readme run --url "$REPO" --output README.md --force; then
+  echo "README not regenerated" >&2
+  exit 1
+fi
+```
+
+A failed clone also removes the directory it was cloning into, so a job that
+retries a repository it cannot reach does not leave one behind per attempt.
+
 ## `repo2readme providers`
 
 Prints the supported LLM providers with their aliases, default models and API

@@ -141,6 +141,10 @@ class UrlRepoLoader:
         self.respect_gitignore = respect_gitignore
         self.max_workers = max_workers
         self.temp_dir = None
+        # Whether this loader created the directory it is cloning into. Only a
+        # directory we made ourselves is ours to remove when the clone fails; a
+        # destination the caller set explicitly is theirs.
+        self._owns_temp_dir = False
 
     def get_repo_name(self):
         return repo_name_from_url(self.clone_url)
@@ -185,11 +189,33 @@ class UrlRepoLoader:
         """
         if self.temp_dir is None:
             self.temp_dir = tempfile.mkdtemp(prefix="repo2readme-")
+            self._owns_temp_dir = True
             return
 
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir, onerror=force_remove)
         os.makedirs(self.temp_dir, exist_ok=True)
+
+    def _discard_clone_dir(self) -> None:
+        """Remove the directory we cloned into, after a failure.
+
+        The destination is created before ``git clone`` runs, and the failure
+        path never removed it: a repository that needs credentials, a host that
+        is down, a branch that does not exist - each one left a directory in the
+        temp directory, and the CLI could not clean it up because the loader
+        raised before it was ever handed back. A CI job retrying a private
+        repository leaked one per attempt.
+
+        Only a directory this loader created is removed, and ``temp_dir`` is
+        reset so a retry gets a fresh one instead of reusing a path that is no
+        longer there.
+        """
+        if not self._owns_temp_dir:
+            return
+
+        self.cleanup()
+        self.temp_dir = None
+        self._owns_temp_dir = False
 
     def load(self, return_skip_info=False):
         self._prepare_clone_dir()
@@ -211,21 +237,41 @@ class UrlRepoLoader:
                 text=True,
             )
         except subprocess.CalledProcessError as e:
+            self._discard_clone_dir()
             raise RuntimeError(f"Failed to clone repository: {e.stderr}") from e
+        except FileNotFoundError as e:
+            # git itself is missing. Worth saying so rather than reporting a
+            # bare "No such file or directory" against a path the user never
+            # typed.
+            self._discard_clone_dir()
+            raise RuntimeError(
+                "Failed to clone repository: git was not found on PATH. "
+                "Install git, or use --local with a checkout you already have."
+            ) from e
+        except BaseException:
+            # Ctrl-C during a clone is the common case here.
+            self._discard_clone_dir()
+            raise
 
         # The clone is now an ordinary directory, so it goes through the same
         # traversal pipeline as a local repository. This is what makes
         # --max-workers, binary detection and the repository metadata apply to
         # remote repositories too; they were previously local-only because this
         # class hand-rolled its own os.walk.
-        docs, ctx = _run_traversal(
-            self.temp_dir,
-            include_patterns=self.include_patterns,
-            exclude_patterns=self.exclude_patterns,
-            max_file_size_kb=self.max_file_size_kb,
-            respect_gitignore=self.respect_gitignore,
-            max_workers=self.max_workers,
-        )
+        try:
+            docs, ctx = _run_traversal(
+                self.temp_dir,
+                include_patterns=self.include_patterns,
+                exclude_patterns=self.exclude_patterns,
+                max_file_size_kb=self.max_file_size_kb,
+                respect_gitignore=self.respect_gitignore,
+                max_workers=self.max_workers,
+            )
+        except BaseException:
+            # The clone succeeded and the walk did not. The caller never
+            # receives this loader, so this is the last chance to clean up.
+            self._discard_clone_dir()
+            raise
 
         if return_skip_info:
             return docs, self.temp_dir, ctx.skipped
