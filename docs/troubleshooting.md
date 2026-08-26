@@ -90,6 +90,15 @@ The tool iterates internally until the reviewer agent scores the draft 8.5+ or a
 
 Confirm the repository is public (or that you have access), and that the URL is a valid `https://github.com/<owner>/<repo>` link.
 
+## A CI job goes green even though the run failed
+
+This is fixed. Failures used to end with status `0`, so a step that regenerated
+a README stayed green when the clone had failed. See
+[Exit codes](./cli-reference.md#exit-codes) for what each status means now:
+`1` is a run that could not be completed, `2` is a command line that was wrong,
+and `0` really does mean the README was generated (or that you declined a
+prompt).
+
 ## Still stuck?
 
 Open an issue: https://github.com/agsaru/Repo2Readme/issues

@@ -12,6 +12,7 @@ import os
 from collections import Counter
 
 from repo2readme import __version__
+from repo2readme.cli.exit_codes import ExitCode, fail
 from repo2readme.utils.logging_config import logging_options
 from repo2readme.utils.output import (
     OutputPathError,
@@ -150,8 +151,14 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
     """ Use --url for GitHub repo url and --local for local repo
     """
     if not url and not local:
-        rprint("[red]Provide either --url or --local[/red]")
-        return
+        # A missing source is a usage error, not a failed run: nothing was
+        # attempted, and the shell has to be able to tell the two apart.
+        fail(
+            "Provide either --url or --local. "
+            "Run 'repo2readme run --help' for the full list of options.",
+            ExitCode.USAGE,
+            printer=rprint,
+        )
 
     source = url if url else local
 
@@ -163,8 +170,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
         try:
             output_target = prepare_output_path(output, create_parents=create_dirs)
         except OutputPathError as e:
-            rprint(f"[red]{escape(str(e))}[/red]")
-            raise SystemExit(2) from e
+            fail(str(e), ExitCode.USAGE, printer=rprint)
 
         if output_target.created_parent:
             rprint(f"[green]Created {output_target.path.parent}[/green]")
@@ -205,8 +211,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
                 files, root_path, loader_obj = loader.load()
                 skipped = []
         except Exception as e:
-            rprint(f"[red]Failed to load repository: {e}[/red]")
-            return
+            fail(f"Failed to load repository: {e}", ExitCode.FAILURE, printer=rprint)
         progress.update(task, advance=1)
 
     documents = []
@@ -277,8 +282,11 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
         try:
             setup_api_keys(provider)
         except Exception as e:
-            rprint(f"[red]Failed to configure API keys: {e}[/red]")
-            return
+            fail(
+                f"Failed to configure API keys: {e}",
+                ExitCode.FAILURE,
+                printer=rprint,
+            )
 
         with Progress() as progress:
             task = progress.add_task("[cyan]Generating summaries...[/cyan]", total=total_documents)
@@ -304,7 +312,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
                 "\n[red]Every file failed to summarize, so there is nothing to "
                 "generate a README from.[/red]"
             )
-            raise SystemExit(1)
+            raise SystemExit(int(ExitCode.FAILURE))
 
         with Progress() as progress:
             rollup_task = progress.add_task("[cyan]Generating directory summaries...[/cyan]", total=1)
@@ -343,7 +351,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
                 "[yellow]Nothing was written. Re-run to try again, or use "
                 "-v to see the reviewer's diagnostics.[/yellow]"
             )
-            raise SystemExit(1) from e
+            raise SystemExit(int(ExitCode.FAILURE)) from e
 
         if output_target is None:
             rprint("\n[green]Generated README:[/green]\n")
@@ -370,7 +378,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
                 rprint(f"\n[red]Could not write {destination}: {escape(str(e))}[/red]")
                 rprint("[yellow]Printing the README instead.[/yellow]\n")
                 rprint(readme)
-                raise SystemExit(1) from e
+                raise SystemExit(int(ExitCode.FAILURE)) from e
 
             rprint(f"[green]Saved to {destination}[/green]")
             if backup and replacing:
@@ -380,7 +388,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
             rprint(
                 f"[red]--strict: {len(failures)} file(s) failed to summarize.[/red]"
             )
-            raise SystemExit(1)
+            raise SystemExit(int(ExitCode.FAILURE))
 
     finally:
         # One write for the whole run, including when the run was interrupted
