@@ -117,6 +117,23 @@ what is actually wrong.
 
 The tool iterates internally until the reviewer agent scores the draft 8.5+ or a max iteration count is hit. If quality is still off, check that your repo's key files (entry points, config, core logic) aren't being filtered out — run with `--dry-run` to confirm they're in the "Files to be processed" list.
 
+## The README has a table of contents that links to nothing
+
+The structural checks — table of contents anchors, placeholder images, a single
+top-level heading — now run against every draft while the review loop is still
+running, and what they find is handed to the next generation round as concrete
+instructions ("the link `#configuration` matches no heading"). Between two
+drafts the reviewer scored about the same, the one with fewer structural
+problems is kept.
+
+Anything still reported at the end is what the loop could not fix, or what it
+never had a chance to: the loop stops at three iterations, and stops early if a
+review fails. Run with `-v` to see the per-draft counts:
+
+```bash
+repo2readme run --local . -v
+```
+
 ## Errors cloning a GitHub URL
 
 Confirm the repository is public (or that you have access), and that the URL is a valid `https://github.com/<owner>/<repo>` link.

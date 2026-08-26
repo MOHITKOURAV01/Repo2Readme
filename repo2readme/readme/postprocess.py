@@ -5,6 +5,13 @@ table-of-contents anchors matching the headings and to avoid placeholder
 images. Those are requests, not guarantees, and the result used to be written
 byte-for-byte. This module fixes what can be fixed mechanically and reports the
 rest instead of silently rewriting the model's content.
+
+The checks are also useful *during* generation rather than only after it. They
+are exact, they are free, and they answer a question the reviewer model is bad
+at: whether ``[Configuration](#configuration)`` actually matches a heading.
+:func:`structural_findings` runs them against a draft and
+:func:`as_author_instructions` renders what they found as something the next
+generation round can act on. See ``readme/agent_workflow.py``.
 """
 
 from __future__ import annotations
@@ -43,6 +50,28 @@ PLACEHOLDER_PATTERNS = (
 )
 
 BLANK_LINE_LIMIT = 2
+
+# What to do about each kind of finding, phrased for whoever writes the next
+# draft. The ValidationIssue message already says what is wrong; this says what
+# to do about it, which is the half a model needs in order to fix it.
+REMEDIES: dict[str, str] = {
+    "broken-anchor": (
+        "Either add a heading whose text produces that anchor, or drop the "
+        "link. Table of contents entries must match the headings exactly."
+    ),
+    "placeholder-image": (
+        "Remove the image. Do not invent a URL for it, and do not replace it "
+        "with another placeholder."
+    ),
+    "missing-h1": (
+        "Add a single top-level heading naming the project, as the first "
+        "heading in the document."
+    ),
+    "duplicate-h1": (
+        "Keep one top-level heading and demote the others to '##'."
+    ),
+    "empty": "Produce the README; the previous draft had no content.",
+}
 
 
 @dataclass(frozen=True)
@@ -283,6 +312,33 @@ def validate_markdown(text: str) -> list[ValidationIssue]:
         *find_broken_anchor_links(text),
         *find_placeholder_images(text),
     ]
+
+
+def structural_findings(text: str) -> list[ValidationIssue]:
+    """Problems in a draft, judged the way the final check will judge it.
+
+    The draft is normalized first, so a model that wrapped its answer in a code
+    fence is not reported as having no headings. Nothing is returned to the
+    caller but the findings - this does not rewrite the draft.
+    """
+    return validate_markdown(normalize_markdown(text))
+
+
+def as_author_instructions(issues: list[ValidationIssue]) -> str:
+    """Render findings as instructions for the next draft.
+
+    Returns ``""`` when there is nothing to say, so a caller can append the
+    result unconditionally.
+    """
+    if not issues:
+        return ""
+
+    lines = ["Structural problems found in the previous draft, fix all of them:"]
+    for issue in issues:
+        remedy = REMEDIES.get(issue.kind, "")
+        lines.append(f"- {issue.message}." + (f" {remedy}" if remedy else ""))
+
+    return "\n".join(lines)
 
 
 def postprocess_readme(text: str) -> tuple[str, list[ValidationIssue]]:
