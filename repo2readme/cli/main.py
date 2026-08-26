@@ -11,7 +11,7 @@ import os
 from collections import Counter
 
 from repo2readme import __version__
-from repo2readme.utils.console import echo_document, safe
+from repo2readme.utils.console import echo_document, notify, safe, status_console
 from repo2readme.utils.logging_config import logging_options
 from repo2readme.utils.output import (
     OutputPathError,
@@ -150,7 +150,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
     """ Use --url for GitHub repo url and --local for local repo
     """
     if not url and not local:
-        rprint("[red]Provide either --url or --local[/red]")
+        notify("[red]Provide either --url or --local[/red]")
         return
 
     source = url if url else local
@@ -163,11 +163,11 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
         try:
             output_target = prepare_output_path(output, create_parents=create_dirs)
         except OutputPathError as e:
-            rprint(f"[red]{safe(e)}[/red]")
+            notify(f"[red]{safe(e)}[/red]")
             raise SystemExit(2) from e
 
         if output_target.created_parent:
-            rprint(f"[green]Created {safe(output_target.path.parent)}[/green]")
+            notify(f"[green]Created {safe(output_target.path.parent)}[/green]")
 
     # Initialize file summary cache
     cache_dir = os.path.join(os.getcwd(), ".repo2readme", "cache")
@@ -187,7 +187,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
         autosave=False,
     )
 
-    with Progress() as progress:
+    with Progress(console=status_console()) as progress:
         task = progress.add_task("[cyan]Loading repository...", total=1)
         try:
             loader = RepoLoader(
@@ -205,7 +205,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
                 files, root_path, loader_obj = loader.load()
                 skipped = []
         except Exception as e:
-            rprint(f"[red]Failed to load repository: {safe(e)}[/red]")
+            notify(f"[red]Failed to load repository: {safe(e)}[/red]")
             return
         progress.update(task, advance=1)
 
@@ -231,6 +231,9 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
     estimated_tokens, total_size_bytes, total_documents = estimate_analysis_cost(documents)
 
     if dry_run:
+        # The report is what --dry-run produces, so it goes to stdout. In a
+        # normal run the product is the README and everything else is
+        # commentary, which is why the rest of this command uses notify().
         rprint("\n[bold]Repository Tree[/bold]\n")
         # The tree is made of file names, and a Next.js route is spelled
         # src/[id]/page.tsx - printing it as markup deletes the directory.
@@ -265,25 +268,25 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
         return
 
     # Normal execution: print estimation first
-    rprint("\n[bold]Repository Analysis[/bold]\n")
-    rprint(f"Files to summarize : {total_documents}")
-    rprint(f"Estimated tokens   : ~{estimated_tokens:,}")
-    rprint(f"Request size       : ~{format_size(total_size_bytes)}")
+    notify("\n[bold]Repository Analysis[/bold]\n")
+    notify(f"Files to summarize : {total_documents}")
+    notify(f"Estimated tokens   : ~{estimated_tokens:,}")
+    notify(f"Request size       : ~{format_size(total_size_bytes)}")
 
     try:
         if not force:
-            proceed = click.confirm("\nProceed?", default=False)
+            proceed = click.confirm("\nProceed?", default=False, err=True)
             if not proceed:
-                rprint("[yellow]Operation cancelled.[/yellow]")
+                notify("[yellow]Operation cancelled.[/yellow]")
                 return
 
         try:
             setup_api_keys(provider)
         except Exception as e:
-            rprint(f"[red]Failed to configure API keys: {safe(e)}[/red]")
+            notify(f"[red]Failed to configure API keys: {safe(e)}[/red]")
             return
 
-        with Progress() as progress:
+        with Progress(console=status_console()) as progress:
             task = progress.add_task("[cyan]Generating summaries...[/cyan]", total=total_documents)
             summaries, errors = generate_all_summaries(
                 documents=documents,
@@ -303,13 +306,13 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
         render_report(total_documents, len(successful_summaries), failures, rprint)
 
         if total_documents and not successful_summaries:
-            rprint(
+            notify(
                 "\n[red]Every file failed to summarize, so there is nothing to "
                 "generate a README from.[/red]"
             )
             raise SystemExit(1)
 
-        with Progress() as progress:
+        with Progress(console=status_console()) as progress:
             rollup_task = progress.add_task("[cyan]Generating directory summaries...[/cyan]", total=1)
             hierarchical_summaries = generate_hierarchical_summaries(
                 file_summaries=successful_summaries,
@@ -327,7 +330,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
             stale_paths = [e["file_path"] for e in stale_entries]
             summary_cache.remove_entries(stale_paths)
 
-        rprint("[cyan]Generating README...[/cyan]")
+        notify("[cyan]Generating README...[/cyan]")
         
         try:
             readme = run_pipeline(
@@ -341,8 +344,8 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
         except ReadmeGenerationError as e:
             # Nothing is written: an empty README would replace the user's
             # existing file with zero bytes.
-            rprint(f"\n[red]{safe(e)}[/red]")
-            rprint(
+            notify(f"\n[red]{safe(e)}[/red]")
+            notify(
                 "[yellow]Nothing was written. Re-run to try again, or use "
                 "-v to see the reviewer's diagnostics.[/yellow]"
             )
@@ -353,7 +356,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
             # run, not a console message: `repo2readme run --local . > README.md`
             # has to put the model's Markdown in the file, brackets and long
             # lines included.
-            rprint("\n[green]Generated README:[/green]\n")
+            notify("\n[green]Generated README:[/green]\n")
             echo_document(readme)
         else:
             destination = output_target.path
@@ -363,10 +366,11 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
                 should_overwrite = click.confirm(
                     f"{destination} already exists. Do you want to overwrite it?",
                     default=False,
+                    err=True,
                 )
 
                 if not should_overwrite:
-                    rprint("[yellow]Output file was not overwritten.[/yellow]")
+                    notify("[yellow]Output file was not overwritten.[/yellow]")
                     return
 
             try:
@@ -374,22 +378,22 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
             except OSError as e:
                 # The README exists and was paid for; printing it is the only
                 # way the user keeps it. Silently discarding it is not.
-                rprint(
+                notify(
                     f"\n[red]Could not write {safe(destination)}: {safe(e)}[/red]"
                 )
-                rprint("[yellow]Printing the README instead.[/yellow]\n")
+                notify("[yellow]Printing the README instead.[/yellow]\n")
                 echo_document(readme)
                 raise SystemExit(1) from e
 
-            rprint(f"[green]Saved to {safe(destination)}[/green]")
+            notify(f"[green]Saved to {safe(destination)}[/green]")
             if backup and replacing:
-                rprint(
+                notify(
                     f"[green]Previous version kept at "
                     f"{safe(backup_path_for(destination))}[/green]"
                 )
 
         if strict and failures:
-            rprint(
+            notify(
                 f"[red]--strict: {len(failures)} file(s) failed to summarize.[/red]"
             )
             raise SystemExit(1)

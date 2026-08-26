@@ -35,6 +35,20 @@ indices and all. The same applies to file paths that contain brackets, such as
 a Next.js `src/[id]/page.tsx` route, which used to disappear from the
 `--dry-run` listing.
 
+The commentary moved with it. The token estimate, the progress bars, the
+confirmation prompt and "Saved to ..." were also on stdout, so they ended up in
+the redirected file too. Stdout now carries the product and stderr carries
+everything the CLI says about the run, so you can redirect one and still watch
+the other:
+
+```bash
+repo2readme run --local . > README.md      # progress still on the terminal
+repo2readme run --local . 2> run.log       # or the other way round
+```
+
+`--dry-run` is the exception, and deliberately: its report *is* what the command
+produces, so it stays on stdout and can be redirected as usual.
+
 ## "Missing API key" or repeated key prompts
 
 Your keys may not be saved correctly. Try setting them as environment variables instead:

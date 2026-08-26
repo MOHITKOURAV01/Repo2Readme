@@ -27,6 +27,19 @@ used to produce a file that was not the README the model wrote.
 This module draws the line. :func:`echo_document` writes a document to stdout
 byte for byte, with no markup pass and no wrapping. :func:`safe` escapes a value
 so it can be interpolated into a Rich string without being read as markup.
+
+There is a second half to the same problem. A redirect captures *stdout*, and
+the CLI's own messages - the token estimate, the progress bar, "Saved to ..." -
+were on stdout too, so they landed in the file alongside the README:
+
+    Repository Analysis
+    Files to summarize : 12
+    ...
+    Generated README:
+    # Sample Project
+
+The rule the module applies is that **stdout carries the product and stderr
+carries the commentary**. :func:`notify` is where the commentary goes.
 """
 
 from __future__ import annotations
@@ -35,7 +48,33 @@ import sys
 from typing import Any, TextIO
 
 import click
+from rich.console import Console
 from rich.markup import escape
+
+# One console for everything the CLI says about itself. ``stderr=True`` is read
+# at write time rather than at construction, so this stays correct under
+# ``click.testing.CliRunner``, which replaces the streams.
+_status_console = Console(stderr=True)
+
+
+def status_console() -> Console:
+    """The console the CLI's own messages go to.
+
+    Separate from stdout so that ``repo2readme run --local . > README.md`` puts
+    the README in the file and the commentary on the terminal, where the user
+    can still read it.
+    """
+    return _status_console
+
+
+def notify(message: str = "") -> None:
+    """Print one of the CLI's own messages, with Rich markup, to stderr.
+
+    A drop-in replacement for ``rich.print`` at the call sites that report on
+    the run rather than producing its result. Values interpolated into
+    ``message`` should still go through :func:`safe`.
+    """
+    _status_console.print(message)
 
 
 def safe(value: Any) -> str:

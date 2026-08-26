@@ -14,7 +14,13 @@ import io
 import pytest
 from click.testing import CliRunner
 
-from repo2readme.utils.console import echo_document, echo_documents, safe
+from repo2readme.utils.console import (
+    echo_document,
+    echo_documents,
+    notify,
+    safe,
+    status_console,
+)
 
 cli_main = importlib.import_module("repo2readme.cli.main")
 
@@ -133,6 +139,120 @@ def _stub_pipeline(monkeypatch, readme=README):
         lambda **kwargs: [{"file_path": "main.py", "description": "d"}],
     )
     monkeypatch.setattr(cli_main, "run_pipeline", lambda **kwargs: readme)
+
+
+def test_status_output_goes_to_stderr(capsys):
+    notify("[green]Saved[/green]")
+    captured = capsys.readouterr()
+    assert "Saved" in captured.err
+    assert captured.out == ""
+
+
+def test_the_status_console_is_a_stderr_console():
+    assert status_console().stderr is True
+
+
+def test_redirected_stdout_is_exactly_the_readme(monkeypatch, tmp_path):
+    """What `repo2readme run --local . > README.md` actually writes.
+
+    The commentary - the token estimate, the progress bar, "Generated README:" -
+    was on stdout too, so it landed in the file alongside the README.
+    """
+    (tmp_path / "main.py").write_text("print('hi')", encoding="utf-8")
+    _stub_pipeline(monkeypatch)
+
+    result = CliRunner().invoke(
+        cli_main.main, ["run", "--local", str(tmp_path), "--force"]
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout == README
+
+
+def test_the_commentary_is_still_shown(monkeypatch, tmp_path):
+    """Moved, not removed: the user still sees what the run is doing."""
+    (tmp_path / "main.py").write_text("print('hi')", encoding="utf-8")
+    _stub_pipeline(monkeypatch)
+
+    result = CliRunner().invoke(
+        cli_main.main, ["run", "--local", str(tmp_path), "--force"]
+    )
+
+    assert "Repository Analysis" in result.stderr
+    assert "Generated README" in result.stderr
+
+
+def test_redirected_stdout_after_a_failed_write_is_exactly_the_readme(
+    monkeypatch, tmp_path
+):
+    (tmp_path / "main.py").write_text("print('hi')", encoding="utf-8")
+    _stub_pipeline(monkeypatch)
+
+    def refuse(*args, **kwargs):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(cli_main, "write_readme", refuse)
+
+    result = CliRunner().invoke(
+        cli_main.main,
+        ["run", "--local", str(tmp_path), "--force", "--output", str(tmp_path / "OUT.md")],
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == README
+    assert "Printing the README instead." in result.stderr
+
+
+def test_writing_to_a_file_leaves_stdout_empty(monkeypatch, tmp_path):
+    (tmp_path / "main.py").write_text("print('hi')", encoding="utf-8")
+    _stub_pipeline(monkeypatch)
+    destination = tmp_path / "OUT.md"
+
+    result = CliRunner().invoke(
+        cli_main.main,
+        ["run", "--local", str(tmp_path), "--force", "--output", str(destination)],
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout == ""
+    assert destination.read_text(encoding="utf-8") == README
+    assert "Saved to" in result.stderr
+
+
+def test_the_confirmation_prompt_does_not_reach_stdout(monkeypatch, tmp_path):
+    (tmp_path / "main.py").write_text("print('hi')", encoding="utf-8")
+    _stub_pipeline(monkeypatch)
+
+    result = CliRunner().invoke(
+        cli_main.main, ["run", "--local", str(tmp_path)], input="y\n"
+    )
+
+    assert result.exit_code == 0
+    assert "Proceed?" in result.stderr
+    assert "Proceed?" not in result.stdout
+    # CliRunner echoes the simulated keystrokes onto stdout itself, so compare
+    # against what the command wrote rather than against the whole stream.
+    assert result.stdout.endswith(README)
+
+
+def test_the_dry_run_report_stays_on_stdout(tmp_path):
+    """It is what --dry-run produces, so it is the product, not commentary."""
+    (tmp_path / "main.py").write_text("print('hi')", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli_main.main, ["run", "--local", str(tmp_path), "--dry-run"]
+    )
+
+    assert result.exit_code == 0
+    assert "Repository Analysis" in result.stdout
+    assert "Files to be processed" in result.stdout
+    assert "Dry run complete." in result.stdout
+
+
+def test_a_failure_message_goes_to_stderr(tmp_path):
+    result = CliRunner().invoke(cli_main.main, ["run", "--local", "/nope/not/here"])
+    assert "Failed to load repository" in result.stderr
+    assert "Failed to load repository" not in result.stdout
 
 
 def test_printed_readme_is_byte_for_byte_the_generated_one(monkeypatch, tmp_path):
