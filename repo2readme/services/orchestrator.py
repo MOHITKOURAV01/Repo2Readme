@@ -31,6 +31,11 @@ def run_pipeline(
     pointing at a heading that no longer exists, a placeholder image - is
     logged as a warning rather than silently rewritten.
 
+    Those same checks now run inside the loop as well, against each draft as it
+    is produced, so what they find reaches the next generation round as feedback
+    instead of only being reported once there is nothing left to do with it.
+    See ``readme/agent_workflow.py``.
+
     Raises
     ------
     ReadmeGenerationError
@@ -47,6 +52,9 @@ def run_pipeline(
         "max_iterations": 3,
         'best_score': 0.0,
         "best_readme": "",
+        # Structural problems in the draft currently being kept. Seeded so the
+        # first comparison has something to compare against.
+        "best_defects": 0,
         "provider": provider,
         "model": model,
         "base_url": base_url,
@@ -60,8 +68,18 @@ def run_pipeline(
         if error:
             logger.warning("README review did not complete: %s", error)
 
+    defects = final_state.get("defects") or []
+    if len(defects) > 1:
+        logger.info(
+            "Structural problems per draft: %s",
+            ", ".join(str(count) for count in defects),
+        )
+
     readme, issues = postprocess_readme(select_readme(final_state))
 
+    # The loop has already been told about these, on every round after the
+    # first. Anything still here is what it could not fix, or what it never got
+    # the chance to - the loop stops at max_iterations, and on a review failure.
     for issue in issues:
         logger.warning("README %s: %s", issue.kind, issue.message)
 
