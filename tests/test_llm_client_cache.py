@@ -76,6 +76,33 @@ def test_different_configurations_get_different_keys(left, right):
     assert cache_key(**left) != cache_key(**right)
 
 
+def test_an_environment_key_is_part_of_the_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "one")
+    first = cache_key("openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "two")
+    assert cache_key("openai") != first
+
+
+def test_an_explicit_key_and_the_same_environment_key_share_a_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "same")
+    assert cache_key("openai") == cache_key("openai", api_key="same")
+
+
+def test_an_explicit_key_wins_over_the_environment(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "from-env")
+    assert cache_key("openai", api_key="explicit") != cache_key("openai")
+
+
+def test_a_keyless_provider_needs_no_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "irrelevant")
+    assert cache_key("ollama") == cache_key("ollama")
+
+
+def test_the_environment_key_is_not_stored_in_the_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-the-environment")
+    assert "sk-from-the-environment" not in repr(cache_key("openai"))
+
+
 def test_the_api_key_is_not_stored_in_the_key():
     key = cache_key("groq", api_key="sk-super-secret-value")
     assert "sk-super-secret-value" not in repr(key)
@@ -272,6 +299,22 @@ def test_create_llm_still_builds_per_distinct_model(fake_openai):
     factory.create_llm(provider="openai", model="a", api_key="k")
 
     assert [kwargs["model"] for kwargs in fake_openai] == ["a", "b"]
+
+
+def test_create_llm_notices_a_rotated_environment_key(fake_openai, monkeypatch):
+    """The key comes from the environment when it is not passed, so it has to
+    be part of the configuration - otherwise a rotation is served a client built
+    with the old key."""
+    monkeypatch.setenv("OPENAI_API_KEY", "key-one")
+    first = factory.create_llm(provider="openai")
+    reused = factory.create_llm(provider="openai")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "key-two")
+    rotated = factory.create_llm(provider="openai")
+
+    assert first is reused
+    assert rotated is not first
+    assert [kwargs["api_key"] for kwargs in fake_openai] == ["key-one", "key-two"]
 
 
 def test_create_llm_separates_clients_by_api_key(fake_openai):

@@ -241,6 +241,11 @@ run. The configuration is the resolved `--provider`, `--model` and `--base-url`
 plus the API key, so `--provider gemini` and `--provider google` share one, and
 so do `--model gemini-2.5-flash` and no `--model` at all.
 
+The key is resolved the same way the client resolves it — the explicit argument
+if there is one, otherwise the provider's environment variable — so changing
+`GROQ_API_KEY` mid-process produces a new client rather than reusing one built
+with the old key.
+
 It used to be built per request — once per file, once per directory roll-up and
 once per iteration of the review loop — and each one carries its own HTTP
 connection pool and TLS context, so a 400-file repository paid 400 handshakes
@@ -254,7 +259,7 @@ from repo2readme.llm.client_cache import clear_client_cache
 
 create_llm(provider="groq")     # cached; the same call returns the same object
 build_llm(provider="groq")      # a fresh client, every time
-clear_client_cache()            # after rotating a key, or changing configuration
+clear_client_cache()            # release the connection pools
 ```
 
 An unknown provider and a missing provider package both raise, and neither is

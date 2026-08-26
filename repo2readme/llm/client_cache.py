@@ -32,11 +32,17 @@ What is deliberately not cached:
   the same thing.
 * a call whose keyword arguments cannot be hashed. Rather than guess at
   equality, those bypass the cache and build a client the old way.
+
+The API key is part of the key, resolved the same way ``create_llm`` resolves it
+- the explicit argument if there is one, otherwise the provider's environment
+variable - so rotating a key produces a new client without anyone having to
+remember to clear the cache.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
 import threading
 from typing import Any, Callable
 
@@ -58,6 +64,22 @@ def _fingerprint(api_key: str | None) -> str:
         return ""
     digest = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
     return digest[:_FINGERPRINT_LENGTH]
+
+
+def _resolved_api_key(spec, api_key: str | None) -> str | None:
+    """The key the client will actually be built with.
+
+    ``create_llm`` falls back to the provider's environment variable when no key
+    is passed, so the key is part of the configuration whether or not the caller
+    named it. Fingerprinting only the explicit argument would key every keyless
+    call to the same entry, and a key rotated in the environment would keep
+    being served a client built with the old one.
+    """
+    if api_key:
+        return api_key
+    if not spec.env_var:
+        return None
+    return os.getenv(spec.env_var)
 
 
 def _kwargs_signature(kwargs: dict[str, Any]) -> tuple | None:
@@ -88,8 +110,10 @@ def cache_key(
 ) -> tuple | None:
     """The key a client is stored under, or None when it cannot be cached.
 
-    The provider name, model and base URL are resolved first, so every spelling
-    of the same configuration lands on one entry.
+    The provider name, model, base URL and API key are resolved first - the key
+    through the provider's environment variable when the caller did not pass one
+    - so every spelling of the same configuration lands on one entry, and a
+    change to any of them lands on a different one.
 
     Raises
     ------
@@ -107,7 +131,7 @@ def cache_key(
         spec.name,
         model or spec.default_model,
         base_url or spec.default_base_url,
-        _fingerprint(api_key),
+        _fingerprint(_resolved_api_key(spec, api_key)),
         signature,
     )
 
@@ -152,9 +176,10 @@ def get_or_create(
 def clear_client_cache() -> None:
     """Forget every client and reset the counters.
 
-    Needed by tests, and by any long-lived caller that changes configuration -
-    a rotated key or a different model should not be served from an instance
-    built for the previous one.
+    A different configuration - including a rotated key - already produces a
+    different entry, so this is not needed to stay correct. It is here for tests,
+    and for a caller that wants the connection pools released rather than held
+    for the life of the process.
     """
     with _lock:
         _clients.clear()
