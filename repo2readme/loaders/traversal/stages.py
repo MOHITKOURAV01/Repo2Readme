@@ -14,7 +14,7 @@ from enum import Enum
 from typing import Callable, Iterable, Optional
 from collections import OrderedDict
 
-from repo2readme.utils.filter import github_file_filter
+from repo2readme.utils.filter import github_file_filter, should_descend
 from repo2readme.utils.gitignore import is_gitignored
 from repo2readme.utils.text_encoding import decode_bytes, describe_chain
 
@@ -206,12 +206,14 @@ def discover_files(
                 "\\", "/"
             )
 
-            allowed, reason = github_file_filter(
+            # Directory rules only. Running a directory through the file
+            # filter pruned every default-ignored directory from the walk, so
+            # an --include naming a file inside one could never be applied -
+            # the file was not reached to be judged.
+            allowed, reason = should_descend(
                 rel_dir_path,
                 include_patterns=include_patterns,
                 exclude_patterns=exclude_patterns,
-                root_path=folder_path,
-                max_file_size_kb=None,
             )
 
             if not allowed:

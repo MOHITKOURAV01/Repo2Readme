@@ -99,6 +99,30 @@ They are **defaults**: the CLI flags are evaluated first, in this order.
    pull in `package-lock.json`; you have to name it exactly.
 3. Otherwise the default rules below apply.
 
+Patterns are matched against the repository-relative path *and* against the
+basename, so `--exclude src/secret.py`, `--exclude secret.py` and
+`--exclude "src/*.py"` all mean what they look like.
+
+### Reaching inside an ignored directory
+
+A pattern that names a path inside an ignored directory reopens exactly that
+path:
+
+```bash
+repo2readme run --local . --include "dist/bundle.js"
+repo2readme run --local . --include "node_modules/my-pkg/index.js"
+repo2readme run --local . --include "dist/**/*.js"
+```
+
+Only the directories the pattern actually leads through are walked —
+`node_modules/my-pkg` is entered, the rest of `node_modules` is not — so
+reopening one file in a large dependency tree does not mean scanning it.
+
+A pattern with no directory part is not enough. `--include "*.js"` names a kind
+of file rather than a place, and does not pull in every bundle under
+`node_modules`; name the path if that is what you want. This is the same rule
+lock files already follow.
+
 ### Manifests are always read
 
 Dependency, build and environment manifests are read even though their
@@ -151,7 +175,10 @@ since they exist to document variable *names*.
 
 ```bash
 repo2readme run --local . --include "data/schema.json"
+repo2readme run --local . --include "dist/bundle.js"
 ```
+
+Use `--dry-run` to confirm what a pattern pulls in before spending tokens on it.
 
 ## File encodings
 

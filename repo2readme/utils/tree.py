@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable
 
-from repo2readme.utils.filter import github_file_filter
+from repo2readme.utils.filter import github_file_filter, should_descend
 from repo2readme.utils.gitignore import is_gitignored
 
 # A tree is pasted into the generator prompt on every iteration of the review
@@ -160,16 +160,15 @@ def _collect_relative_paths(
             full_path = os.path.join(current_dir, directory)
             rel_path = os.path.relpath(full_path, root).replace("\\", "/")
 
-            # github_file_filter relativizes against root_path itself, so it
-            # must be handed the absolute path - giving it an already-relative
-            # one makes os.path.relpath resolve against the CWD and the
-            # resulting match path is meaningless.
-            allowed, _ = github_file_filter(
-                full_path,
+            # Directory rules only, and matched on the repository-relative
+            # path. The traversal pipeline makes the same call, so a tree
+            # generated with the same arguments still describes the same files
+            # - including the ones an --include reaches inside an otherwise
+            # ignored directory.
+            allowed, _ = should_descend(
+                rel_path,
                 include_patterns=include_patterns,
                 exclude_patterns=exclude_patterns,
-                root_path=root,
-                max_file_size_kb=None,
             )
             if not allowed:
                 continue

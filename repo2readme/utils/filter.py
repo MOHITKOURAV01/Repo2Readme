@@ -357,6 +357,96 @@ def is_file_size_allowed(
     return True, None
 
 
+def include_reaches_into(directory: str, include_patterns: Iterable[str] | None) -> bool:
+    """Whether any ``--include`` pattern could match a file below ``directory``.
+
+    Traversal decides whether to descend into a directory before it has seen a
+    single file inside it, so it cannot ask ``github_file_filter`` - that
+    function judges a path, and the paths that matter do not exist yet.
+
+    A pattern reaches into a directory when its leading segments match the
+    directory chain *and* it has at least one segment left over to name
+    something inside:
+
+    ==========================  =============  =======
+    pattern                     directory      reaches
+    ==========================  =============  =======
+    ``dist/bundle.js``          ``dist``       yes
+    ``dist/**/*.js``            ``dist/sub``   yes
+    ``vendor/*.go``             ``vendor``     yes
+    ``vendor/*.go``             ``vendor/x``   no
+    ``node_modules/pkg/i.js``   ``node_mod…``  yes
+    ``node_modules/pkg/i.js``   ``node_m…/x``  no
+    ``*.py``                    ``dist``       no
+    ==========================  =============  =======
+
+    The last row is the important one. A bare ``*.py`` names a file, not a
+    place, and treating it as permission to walk ``node_modules`` would undo
+    the default rules for anyone who passes a broad pattern. This mirrors
+    :func:`_matches_protected_include`, which already refuses to let ``*.json``
+    stand for "and the lock files too".
+    """
+    if not include_patterns:
+        return False
+
+    directory_parts = [
+        part for part in _normalize_path(directory).split("/") if part
+    ]
+    if not directory_parts:
+        return False
+
+    for pattern in include_patterns:
+        pattern_parts = [
+            part for part in _normalize_path(pattern).split("/") if part
+        ]
+        # Nothing left over to name something inside the directory.
+        if len(pattern_parts) <= len(directory_parts):
+            continue
+
+        for directory_part, pattern_part in zip(directory_parts, pattern_parts):
+            if pattern_part == "**":
+                return True
+            if not fnmatch.fnmatch(directory_part, pattern_part):
+                break
+        else:
+            return True
+
+    return False
+
+
+def should_descend(
+    directory: str,
+    include_patterns: Iterable[str] | None = None,
+    exclude_patterns: Iterable[str] | None = None,
+) -> tuple[bool, str]:
+    """Whether traversal should walk into ``directory``.
+
+    ``directory`` is a repository-relative path. Returns ``(True, "")`` to
+    descend, or ``(False, reason)`` with the same reason strings
+    :func:`github_file_filter` uses, so the skip report reads the same.
+
+    The rules are the directory-level ones only. Size does not apply to a
+    directory, and the file rules cannot be applied to one - which is what went
+    wrong before: traversal filtered directories through
+    ``github_file_filter``, so a default-ignored directory was pruned from the
+    walk and the files inside it never reached the file rules that would have
+    honoured ``--include``.
+    """
+    if _matches_any(directory, exclude_patterns):
+        return False, "excluded by pattern"
+
+    if _matches_any(directory, include_patterns):
+        return True, ""
+
+    if not is_default_ignored(directory):
+        return True, ""
+
+    if include_reaches_into(directory, include_patterns):
+        return True, ""
+
+    return False, "ignored by default rules"
+
+
 def github_file_filter(
     path: str,
     include_patterns: Iterable[str] | None = None,
@@ -367,11 +457,19 @@ def github_file_filter(
     normalized_path = _normalize_path(path)
     basename = os.path.basename(normalized_path)
 
-    # When a root_path is provided, match include/exclude patterns against
-    # the path relative to that root so patterns like `src/*` work as
-    # expected for absolute file paths.
+    # Patterns are matched against the repository-relative path, so `src/*`
+    # means what it looks like. An absolute path is relativized against
+    # root_path to get there; a path that is already relative is one already.
+    #
+    # os.path.relpath() resolves a relative first argument against the *current
+    # working directory* before relativizing, so handing it one produced a
+    # match path like "../../home/me/checkout/src/app.py" - which matches no
+    # pattern a user would write, and whose leading segments are whatever
+    # happens to sit above the working directory. The traversal pipeline passes
+    # relative paths, so every path-shaped --include and --exclude was compared
+    # against that.
     match_path = normalized_path
-    if root_path:
+    if root_path and os.path.isabs(path):
         try:
             rel = os.path.relpath(path, root_path)
             match_path = _normalize_path(rel)

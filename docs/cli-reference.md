@@ -21,7 +21,7 @@ repo2readme run [OPTIONS]
 | `--strict` | | Exit with a non-zero status if any file fails to summarize. |
 | `--respect-gitignore` | | Honor `.gitignore` and `.git/info/exclude` patterns during repository traversal. This is opt-in; default behavior is unchanged. |
 | `--dry-run` | | Preview the analysis (repo tree, token estimate, files to be processed) without making any API calls or requiring API keys. |
-| `--include <PATTERN>` | | Glob pattern for files to include, even if normally filtered out. Can be passed multiple times. |
+| `--include <PATTERN>` | | Glob pattern for files to include, even if normally filtered out — including inside an ignored directory, e.g. `dist/bundle.js`. Matched against the repository-relative path and the basename. Can be passed multiple times. |
 | `--exclude <PATTERN>` | | Glob pattern for files to exclude. Can be passed multiple times. |
 | `--max-file-size-kb <N>` | | Skip files larger than N KB. |
 | `--provider <NAME>` | | LLM provider to use. See `repo2readme providers`. |
