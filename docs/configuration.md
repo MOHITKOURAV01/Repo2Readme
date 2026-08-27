@@ -95,7 +95,7 @@ GROQ_API_KEY="a_different_key" repo2readme run --local .
 In CI, or any time stdin is not a terminal, there is nobody to answer a prompt.
 A missing key is reported straight away instead:
 
-```
+```text
 No Groq API key found, and there is no terminal to prompt on. Set
 GROQ_API_KEY in the environment, put it in a .env file, or run repo2readme
 from a terminal once to enter and save it.

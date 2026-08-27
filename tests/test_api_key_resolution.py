@@ -206,6 +206,18 @@ class TestStoreReading:
 
         assert config.load_env() == {}
 
+    def test_a_store_that_is_not_valid_utf8_is_ignored(self, store, no_prompt):
+        # UnicodeDecodeError is neither a JSONDecodeError nor an OSError, so it
+        # was the one kind of unreadable store that still ended the run.
+        store.write_bytes(b'{"GROQ_API_KEY": "\xff\xfe not utf-8"}')
+
+        assert config.load_env() == {}
+
+    def test_a_store_written_here_reads_back(self, store):
+        config.save_env({"GROQ_API_KEY": "gsk_key", "NOTE": "caf\u00e9"})
+
+        assert config.load_env()["NOTE"] == "caf\u00e9"
+
     def test_a_missing_store_reads_as_empty(self, store):
         assert config.load_env() == {}
 

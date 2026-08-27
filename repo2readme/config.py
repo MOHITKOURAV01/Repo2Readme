@@ -99,11 +99,14 @@ def load_env():
     if not os.path.exists(ENV_PATH):
         return {}
     try:
-        with open(ENV_PATH, "r") as f:
+        with open(ENV_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
         # A truncated or hand-edited store should send the user to the prompt,
-        # not end the run with a traceback about JSON.
+        # not end the run with a traceback. UnicodeDecodeError is listed
+        # explicitly: it is neither a JSONDecodeError nor an OSError, so a
+        # store holding bytes that are not valid UTF-8 would otherwise be the
+        # one kind of unreadable store that still ended the run.
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -113,7 +116,9 @@ def save_env(data):
     fd = os.open(ENV_PATH, flags, 0o600)
     if hasattr(os, 'fchmod'):
         os.fchmod(fd, 0o600)
-    with os.fdopen(fd, "w") as f:
+    # Encoding named on both sides of the round trip rather than inherited from
+    # the locale, so a store written on one machine reads on another.
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4)
 
 
