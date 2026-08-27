@@ -93,7 +93,7 @@ directly instead. Nothing is lost; the prompt is just longer than intended, so
 the README may lean more on some directories than others. The report names the
 directories and the reason:
 
-```
+```text
 Directory summary report
 
 Directories not condensed: 2
