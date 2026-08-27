@@ -8,7 +8,10 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = "1.0"
+# 1.1 added the per-entry "repository" field. An older cache is invalidated
+# once on upgrade rather than migrated: the entries it holds are unscoped, and
+# guessing which repository each one came from is not worth a wrong answer.
+CACHE_SCHEMA_VERSION = "1.1"
 
 # How often an autosaving cache writes, in updates. The default of 1 keeps the
 # durability guarantee a library caller gets today: every put() is on disk when
@@ -24,6 +27,12 @@ EXPECTED_ENTRY_FIELDS = {
     "summary",
     "mtime",
 }
+
+# Written by a scoped cache, absent from one built without a repository. Not in
+# EXPECTED_ENTRY_FIELDS so that an entry from an older schema still validates -
+# the schema version check is what rebuilds it, with a message that explains
+# itself, rather than a structural warning about a missing field.
+REPOSITORY_FIELD = "repository"
 
 
 def _validate_cache_structure(data: Any) -> bool:
@@ -93,6 +102,16 @@ class SummaryCache:
     reported as a success: the dirty flag survives it so a later flush retries,
     :meth:`flush` returns ``False``, and the reason is available from
     :attr:`last_write_error` and counted in :meth:`stats`.
+
+    Entries are scoped to the repository they were produced for. One cache file
+    holds the summaries of every repository analyzed from the same working
+    directory, and :meth:`get_deleted_files` answers "which of my entries no
+    longer exist?" - so without a scope it reported another repository's
+    entries as deleted, and the caller dutifully removed them. Pass
+    ``repository`` (see ``repo2readme.loaders.source.repository_identity``) and
+    every entry is stamped with it; lookups and pruning then only ever see the
+    current repository's work. ``repository=None`` keeps the old unscoped
+    behaviour for callers that hold one cache per repository themselves.
     """
 
     def __init__(
@@ -102,10 +121,12 @@ class SummaryCache:
         prompt_template_hash: str,
         autosave: bool = True,
         autosave_every: int = DEFAULT_AUTOSAVE_EVERY,
+        repository: Optional[str] = None,
     ):
         self.cache_dir = cache_dir
         self.config = config
         self.prompt_template_hash = prompt_template_hash
+        self.repository = repository or None
         self.cache_file = os.path.join(cache_dir, "summaries.json")
         self.schema_version = CACHE_SCHEMA_VERSION
         self.autosave = autosave
@@ -328,8 +349,29 @@ class SummaryCache:
         if self.autosave and self._pending_updates >= self.autosave_every:
             self._save()
 
+    def _in_scope(self, entry: dict) -> bool:
+        """Whether ``entry`` belongs to the repository this cache is scoped to.
+
+        An unscoped cache owns everything, which is what a caller keeping one
+        cache file per repository already relied on.
+        """
+        if self.repository is None:
+            return True
+        return entry.get(REPOSITORY_FIELD) == self.repository
+
+    def _scoped_entries(self) -> list:
+        """Every entry belonging to the current repository. Lock held."""
+        return [
+            entry
+            for entry in self._data.get("entries", [])
+            if isinstance(entry, dict) and self._in_scope(entry)
+        ]
+
     def _find_entry(self, file_path: str) -> Optional[dict]:
-        return self._index.get(file_path)
+        entry = self._index.get(file_path)
+        if entry is None or not self._in_scope(entry):
+            return None
+        return entry
 
     def _clear_entries(self, config_hash: str) -> None:
         """Drop every entry and adopt the current configuration. Lock held."""
@@ -416,6 +458,8 @@ class SummaryCache:
                 "summary": summary,
                 "mtime": mtime,
             }
+            if self.repository is not None:
+                payload[REPOSITORY_FIELD] = self.repository
 
             existing = self._index.get(file_path)
             if existing is None:
@@ -424,6 +468,9 @@ class SummaryCache:
             else:
                 # The index holds the same object that is in the entry list, so
                 # updating in place keeps both in sync without an O(N) rebuild.
+                # An entry another repository left at this path is overwritten
+                # rather than merged, so one path is never claimed twice.
+                existing.clear()
                 existing.update(payload)
 
             self._stats["updates"] += 1
@@ -432,14 +479,26 @@ class SummaryCache:
     def get_deleted_files(self, current_files: set) -> list:
         """
         Return cache entries for files that no longer exist in current_files.
+
+        Only entries belonging to this cache's repository are considered.
+        ``current_files`` is the file list of one repository, so without that
+        restriction every entry from every *other* repository analyzed from the
+        same working directory was reported as deleted - and the CLI removes
+        what this returns.
         """
         with self._lock:
             self._load()
             return [
                 entry
-                for entry in self._data.get("entries", [])
+                for entry in self._scoped_entries()
                 if entry.get("file_path") not in current_files
             ]
+
+    def entries_for_repository(self) -> list:
+        """Copies of the entries belonging to this cache's repository."""
+        with self._lock:
+            self._load()
+            return [dict(entry) for entry in self._scoped_entries()]
 
     def remove_entries(self, file_paths: list) -> None:
         """
@@ -454,7 +513,10 @@ class SummaryCache:
             remaining = [
                 entry
                 for entry in self._data.get("entries", [])
-                if entry.get("file_path") not in paths_to_remove
+                if not (
+                    entry.get("file_path") in paths_to_remove
+                    and self._in_scope(entry)
+                )
             ]
             removed = len(self._data.get("entries", [])) - len(remaining)
             if not removed:

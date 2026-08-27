@@ -22,6 +22,7 @@ from repo2readme.utils.output import (
 from repo2readme.utils.tree import generate_tree_from_paths
 from repo2readme.cache import SummaryCache
 from repo2readme.loaders.repo_loader import RepoLoader
+from repo2readme.loaders.source import repository_identity
 from repo2readme.summarize.summary import get_prompt_template_hash
 from repo2readme.dependency_graph import build_dependency_graph
 from repo2readme.providers import PROVIDERS, provider_choices_help
@@ -180,11 +181,16 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
     # rewritten for any change, so saving once per summarized file made a run
     # cost one full serialization per file. The run flushes once at the end,
     # in the finally block, so an interrupted run still keeps its work.
+    # One cache file serves every repository analyzed from this working
+    # directory, so entries carry the repository they belong to. Without that,
+    # the stale-entry sweep below compares one repository's file list against
+    # all of them and deletes everything it does not recognise.
     summary_cache = SummaryCache(
         cache_dir=cache_dir,
         config=summarization_config,
         prompt_template_hash=get_prompt_template_hash(),
         autosave=False,
+        repository=repository_identity(source),
     )
 
     with Progress() as progress:

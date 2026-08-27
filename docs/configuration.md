@@ -248,6 +248,24 @@ The cache is stored in:
 
 This directory is created automatically in the current working directory when you run `repo2readme run`.
 
+Note that it follows the *working directory*, not the repository being analyzed.
+Running the tool from one place against several repositories fills a single
+cache file, which is fine — every entry records the repository it belongs to.
+
+### One cache, several repositories
+
+Each entry is stamped with the repository it was produced for:
+
+- a local repository is identified by its absolute path, so `.`, `~/src/app`
+  and `/home/me/src/app` are one repository rather than three;
+- a remote one is identified by its clone URL, with a trailing slash, a `.git`
+  suffix and any query string removed. The clone directory cannot be used — it
+  is a fresh temporary directory on every run.
+
+Only the current repository's entries are read, replaced, or cleaned up as
+deleted. Analyzing a second repository from the same working directory leaves
+the first one's summaries warm.
+
 ### How caching works
 
 1. **First run (cache miss):** Each file is summarized via the LLM, and the result is stored in the cache along with a SHA-256 content hash, detected language, and the current summarization configuration (provider, model, prompt template hash).
@@ -256,7 +274,7 @@ This directory is created automatically in the current working directory when yo
 
 3. **Modified files:** If a file's content changes, its content hash no longer matches, so the summary is regenerated and the cache is updated.
 
-4. **Deleted files:** Cache entries for files that no longer exist are automatically cleaned up.
+4. **Deleted files:** Cache entries for files that no longer exist are automatically cleaned up. Only entries belonging to the repository being analyzed are considered, so this sweep never touches another repository's work.
 
 ### Cache invalidation
 
@@ -267,6 +285,12 @@ The cache is automatically invalidated when any of the following change:
 - **Base URL** (`--base-url`)
 - **Prompt template** (code change to the summarization prompt)
 - **Cache schema version** (internal format change)
+
+Upgrading from schema `1.0` to `1.1` — the version that records which
+repository each entry belongs to — invalidates the cache once. The entries
+written by an older version do not say which repository they came from, and
+guessing is not worth a wrong answer. The next run re-summarizes and the one
+after that is warm again.
 
 When invalidation occurs, all existing cache entries are discarded and summaries are regenerated on the next run.
 

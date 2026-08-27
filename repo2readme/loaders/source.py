@@ -148,6 +148,45 @@ def is_remote_source(source: str) -> bool:
         return False
 
 
+def repository_identity(source: str) -> str:
+    """A stable name for the repository a run is analyzing.
+
+    Used to scope cached summaries. Two runs over the same repository must
+    produce the same identity however the source was spelled, and two runs over
+    different repositories must never collide:
+
+    * a remote source identifies as its clone URL, with a trailing slash, a
+      ``.git`` suffix and any query string or fragment removed. The clone
+      directory cannot be used - it is a fresh ``mkdtemp`` on every run - so the
+      URL is the only stable thing a remote run has.
+    * a local source identifies as its absolute path, so ``.``, ``~/src/app``
+      and ``/home/me/src/app`` are one repository rather than three.
+
+    Never raises. A source this module cannot classify is returned as typed:
+    the loader is about to fail on it with a better message than a cache key
+    could give, and until then it is at least a consistent identity.
+    """
+    candidate = str(source or "").strip()
+    if not candidate:
+        return ""
+
+    try:
+        resolved = classify_source(candidate)
+    except InvalidSourceError:
+        return candidate
+
+    if resolved.is_local:
+        return os.path.abspath(resolved.value)
+
+    url = resolved.value
+    for separator in ("?", "#"):
+        url = url.split(separator, 1)[0]
+    url = url.rstrip("/")
+    if url.endswith(".git"):
+        url = url[: -len(".git")].rstrip("/")
+    return url
+
+
 def repo_name_from_url(clone_url: str) -> str:
     """
     Last path component of a clone URL, without a ``.git`` suffix.
