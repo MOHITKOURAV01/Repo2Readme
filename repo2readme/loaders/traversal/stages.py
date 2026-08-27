@@ -170,6 +170,42 @@ def _get_file_size(path: str) -> int:
         return 0
 
 
+@dataclass(frozen=True)
+class _FileCandidate:
+    """A file the walk reached, before duplicates have been resolved."""
+
+    absolute_path: str
+    relative_path: str
+    real_path: str
+    is_link: bool
+
+
+def _candidate_rank(candidate: "_FileCandidate") -> tuple:
+    """Sort key deciding which path to a file is the one to keep.
+
+    The file itself beats a link to it: that is the path a reader of the
+    repository would cite, and the one the dependency graph resolves imports
+    against. Between two links - or between two real paths, which a symbolic
+    link to a *directory* can produce - the shallower path wins and the
+    alphabetically earlier one settles the rest.
+
+    ``os.walk`` does not promise an order, so "whichever was seen first" would
+    let the same repository produce a different README on a different machine.
+    """
+    return (
+        candidate.is_link,
+        candidate.relative_path.count("/"),
+        candidate.relative_path,
+    )
+
+
+def _preferred_path(
+    first: "_FileCandidate", second: "_FileCandidate"
+) -> "_FileCandidate":
+    """The one of two paths to the same file that should represent it."""
+    return first if _candidate_rank(first) <= _candidate_rank(second) else second
+
+
 def discover_files(
     folder_path: str,
     include_patterns: Iterable[str] | None = None,
@@ -190,6 +226,9 @@ def discover_files(
     visited_dirs: set[str] = {root_resolved}
     discovered: list[str] = []
     skipped: list[tuple[str, str]] = []
+    candidates: list[_FileCandidate] = []
+    # Real path on disk -> the candidate that gets to represent it.
+    by_real_path: dict[str, _FileCandidate] = {}
     directory_count = 0
     total_size = 0
 
@@ -249,8 +288,9 @@ def discover_files(
         for file_name in files:
             full_path = os.path.join(current, file_name)
             rel_path = os.path.relpath(full_path, folder_path).replace("\\", "/")
+            is_link = os.path.islink(full_path)
 
-            if os.path.islink(full_path):
+            if is_link:
                 resolved_path = os.path.realpath(full_path)
                 if not os.path.exists(resolved_path):
                     skipped.append((rel_path, "broken symbolic link"))
@@ -260,13 +300,40 @@ def discover_files(
                         (rel_path, "symbolic link outside repository")
                     )
                     continue
+            else:
+                resolved_path = os.path.realpath(full_path)
 
             # Skip non-regular files (FIFOs, sockets, etc.)
             if not os.path.isfile(full_path):
                 continue
 
-            discovered.append(full_path)
-            total_size += _get_file_size(full_path)
+            candidates.append(
+                _FileCandidate(
+                    absolute_path=full_path,
+                    relative_path=rel_path,
+                    real_path=resolved_path,
+                    is_link=is_link,
+                )
+            )
+
+    # A symbolic link pointing inside the repository is followed, so the file it
+    # names is reached twice: once as itself and once through the link. Keep one
+    # path per file on disk, chosen in a first pass so that every other path is
+    # reported against the path that was actually kept.
+    for candidate in candidates:
+        incumbent = by_real_path.get(candidate.real_path)
+        if incumbent is None or _preferred_path(candidate, incumbent) is candidate:
+            by_real_path[candidate.real_path] = candidate
+
+    for candidate in candidates:
+        kept = by_real_path[candidate.real_path]
+        if kept is candidate:
+            discovered.append(candidate.absolute_path)
+            total_size += _get_file_size(candidate.absolute_path)
+        else:
+            skipped.append(
+                (candidate.relative_path, f"duplicate of {kept.relative_path}")
+            )
 
     # Sort for deterministic ordering
     discovered.sort()

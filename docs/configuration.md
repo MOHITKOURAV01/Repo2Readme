@@ -181,6 +181,29 @@ binary data, so they are skipped as `binary_file`. Re-saving them with a BOM,
 or as UTF-8, makes them readable. Use `--include` if you need a file the binary
 check refuses.
 
+## Symbolic links
+
+Links are followed, within limits, and each file is analyzed once.
+
+| Case | What happens |
+| --- | --- |
+| A link to a file inside the repository | The file is analyzed under its own path; the link is skipped as `duplicate of <path>` |
+| Several links to one file | All of them are skipped as duplicates of the one path that was kept |
+| A link to a directory inside the repository | Walked once, from whichever path reaches it first; the other is skipped |
+| A link pointing outside the repository | Skipped as `symbolic link outside repository` |
+| A link with no target | Skipped as `broken symbolic link` |
+
+The path that is kept is the file itself rather than a link to it. Where the
+only paths available are links — the target sits in an ignored directory, say —
+the shallower path wins, then the alphabetically earlier one. The choice never
+depends on the order the filesystem returned entries in, so the same repository
+produces the same README on a different machine.
+
+Hard links are not detected: two hard links to one file are two files as far as
+the traversal is concerned.
+
+`--dry-run` lists all of this under "Skipped Files Summary".
+
 ## README post-processing
 
 The model's answer is not written to disk verbatim. Two things happen first.

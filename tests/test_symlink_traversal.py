@@ -162,28 +162,32 @@ def test_local_traversal_nested_symlinks(tmp_path):
 
 
 def test_local_traversal_file_symlink(tmp_path):
-    """File symbolic links are processed normally."""
+    """A file reached through a symbolic link is analyzed once, as itself.
+
+    Directories already work this way - see
+    test_local_traversal_symlink_duplicate_prevention above, where a directory
+    reached twice is skipped as a duplicate. Files used to be the exception:
+    the same bytes were loaded, summarized and billed under both names.
+    """
     _skip_if_no_symlink_support(tmp_path)
 
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
     (repo_dir / "main.py").write_text("print('hello')", encoding="utf-8")
-    
+
     original = repo_dir / "data.py"
     original.write_text("hello", encoding="utf-8")
-    
+
     file_link = repo_dir / "data_link.py"
     file_link.symlink_to(original)
 
     loader = LocalRepoLoader(str(repo_dir))
-    docs, _root = loader.load()
+    docs, _root, skipped = loader.load(return_skip_info=True)
 
     paths = {doc.metadata["relative_path"] for doc in docs}
-    assert paths == {
-        "main.py",
-        "data.py",
-        "data_link.py",
-    }
+    assert paths == {"main.py", "data.py"}
+
+    assert ("data_link.py", "duplicate of data.py") in skipped
 
 
 def test_local_traversal_symlink_duplicate_prevention(tmp_path):
