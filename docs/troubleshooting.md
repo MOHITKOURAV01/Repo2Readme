@@ -20,19 +20,32 @@ goes to a temporary file and is renamed into place. Use `--backup` to keep a
 
 ## "Missing API key" or repeated key prompts
 
-Your keys may not be saved correctly. Try setting them as environment variables instead:
+An exported key is used before the saved one, so setting the variable for the
+provider you are using is enough:
 
 ```bash
 export GROQ_API_KEY="your_groq_api_key"
 export GOOGLE_API_KEY="your_google_api_key"
 ```
 
-Or reset and re-enter them:
+`repo2readme providers` prints the variable each provider reads. If you are
+still asked for a key, check that it is exported in the shell that runs
+`repo2readme` and that the value is not empty — an unfilled `.env` line
+(`GROQ_API_KEY=`) counts as no key at all.
+
+Or reset the saved keys and re-enter them:
 
 ```bash
 repo2readme reset
 repo2readme run --local ./my-project
 ```
+
+## "there is no terminal to prompt on"
+
+The run needs a key it could not find, and stdin is not a terminal — a CI job,
+a cron entry, or a piped command. Nothing can be asked for in that situation,
+so the run stops immediately rather than blocking. Set the environment variable
+named in the message, or run the tool once from a terminal to save the key.
 
 ## Command not found: repo2readme
 

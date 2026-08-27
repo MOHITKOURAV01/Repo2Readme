@@ -43,6 +43,19 @@ repo2readme run --local . --provider ollama --model llama3
 A provider that is not in the table now fails immediately with the list of
 supported names, instead of failing later during summarization.
 
+## Where a key is looked for
+
+Each key is resolved in this order, and the first one found is used:
+
+1. **The process environment.** `GROQ_API_KEY` and friends, whether you
+   exported them yourself or `repo2readme` loaded them from a `.env` file.
+2. **The saved key store**, `~/.repo2readme_env.json`, written by an earlier
+   interactive run.
+3. **A prompt**, if there is a terminal to ask on.
+
+A key found in the environment is used as-is and never copied into the store,
+so rotating it in one place is enough.
+
 ## Option 1: Let the CLI prompt you
 
 The first time you run `repo2readme run` without keys set, the CLI will interactively ask for them and save them locally to:
@@ -69,6 +82,27 @@ via `python-dotenv`.
 ```bash
 cp .env.example .env
 ```
+
+An exported key takes precedence over a saved one, so you can override the
+stored key for a single run without touching the store:
+
+```bash
+GROQ_API_KEY="a_different_key" repo2readme run --local .
+```
+
+## Running without a terminal
+
+In CI, or any time stdin is not a terminal, there is nobody to answer a prompt.
+A missing key is reported straight away instead:
+
+```
+No Groq API key found, and there is no terminal to prompt on. Set
+GROQ_API_KEY in the environment, put it in a .env file, or run repo2readme
+from a terminal once to enter and save it.
+```
+
+Set the variable for the provider you are using — `repo2readme providers`
+prints the name of each one — and the run proceeds without prompting.
 
 ## Resetting your keys
 

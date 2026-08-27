@@ -1,3 +1,4 @@
+import json
 import importlib
 
 import pytest
@@ -223,35 +224,40 @@ class TestApiKeyResolution:
         assert config.get_api_key("ollama") is None
 
     def test_alias_reads_the_canonical_env_var(self, monkeypatch, tmp_path):
-        import json
-
         from repo2readme import config
 
         env_file = tmp_path / "env.json"
         env_file.write_text(json.dumps({"GOOGLE_API_KEY": "google-secret"}))
         monkeypatch.setattr(config, "ENV_PATH", str(env_file))
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
         assert config.get_api_key("gemini") == "google-secret"
 
-    def test_setup_api_keys_exports_provider_env_var(self, monkeypatch):
+    def test_setup_api_keys_exports_provider_env_var(self, monkeypatch, tmp_path):
+        import os
+
+        from repo2readme import config
         from repo2readme.services import environment
 
-        monkeypatch.setattr(environment, "get_api_key", lambda name: "secret")
+        store = tmp_path / "env.json"
+        store.write_text(json.dumps({"TOGETHER_API_KEY": "secret"}))
+        monkeypatch.setattr(config, "ENV_PATH", str(store))
         monkeypatch.delenv("TOGETHER_API_KEY", raising=False)
 
         environment.setup_api_keys("together")
 
-        import os
-
         assert os.environ["TOGETHER_API_KEY"] == "secret"
 
-    def test_setup_api_keys_skips_keyless_provider(self, monkeypatch):
+    def test_setup_api_keys_skips_keyless_provider(self, monkeypatch, tmp_path):
+        from repo2readme import config
         from repo2readme.services import environment
 
-        def fail(name):
-            raise AssertionError("should not resolve a key for ollama")
+        monkeypatch.setattr(config, "ENV_PATH", str(tmp_path / "env.json"))
 
-        monkeypatch.setattr(environment, "get_api_key", fail)
+        def fail(*args, **kwargs):
+            raise AssertionError("ollama must not prompt for an API key")
+
+        monkeypatch.setattr(config, "click", type("c", (), {"prompt": fail}))
 
         environment.setup_api_keys("ollama")
 
