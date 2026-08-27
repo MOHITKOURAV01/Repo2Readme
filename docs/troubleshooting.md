@@ -82,6 +82,33 @@ Authentication failures, unsupported providers and context-length errors are
 never retried — retrying cannot fix them, and failing immediately tells you
 what is actually wrong.
 
+## "Directory summary report: N directories not condensed"
+
+Above about fifteen files, summaries are rolled up per directory before the
+README is generated — one call condenses a directory's contents into a single
+description, which is what keeps a large repository inside the model's context.
+
+When one of those calls fails, that directory's file summaries are used
+directly instead. Nothing is lost; the prompt is just longer than intended, so
+the README may lean more on some directories than others. The report names the
+directories and the reason:
+
+```
+Directory summary report
+
+Directories not condensed: 2
+
+2 director(y/ies): Error code: 429 - rate limit reached
+    - src/api
+    - src
+
+Their file summaries were used directly, so nothing was lost.
+```
+
+The usual cause is a rate limit, and the advice above applies — raise
+`REPO2README_MAX_RETRIES`, or lower `--max-workers`. A re-run costs nothing for
+the files themselves, since their summaries are cached.
+
 ## Generated README looks incomplete or low quality
 
 The tool iterates internally until the reviewer agent scores the draft 8.5+ or a max iteration count is hit. If quality is still off, check that your repo's key files (entry points, config, core logic) aren't being filtered out — run with `--dry-run` to confirm they're in the "Files to be processed" list.

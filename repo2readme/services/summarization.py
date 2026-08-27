@@ -6,7 +6,7 @@ from repo2readme.utils.detect_language import detect_lang
 from repo2readme.utils.workers import resolve_worker_count
 from repo2readme.summarize.summary import summarize_file
 from repo2readme.cache import SummaryCache
-from repo2readme.services.reporting import SummaryFailure
+from repo2readme.services.reporting import SummaryFailure, is_failed_summary
 
 def resolve_language(metadata: Dict[str, Any], content: str) -> str:
     """The language of a document, preferring what the traversal already found.
@@ -141,6 +141,12 @@ def build_directory_tree(file_summaries: List[Dict[str, Any]]) -> Dict[str, Any]
                 current = current["children"][part]
     return tree
 
+# Below this many files the roll-up is skipped: the summaries already fit in one
+# prompt, and a directory summary of a handful of files loses more detail than
+# it saves context.
+ROLLUP_THRESHOLD = 15
+
+
 def generate_hierarchical_summaries(
     file_summaries: List[Dict[str, Any]],
     provider: str | None = None,
@@ -148,26 +154,41 @@ def generate_hierarchical_summaries(
     base_url: str | None = None,
     progress=None,
     task_id=None
-) -> List[Dict[str, Any]]:
+) -> tuple[List[Dict[str, Any]], List[SummaryFailure]]:
     """
-    Rolls up file summaries into directory summaries recursively.
+    Roll file summaries up into directory summaries, recursively.
+
+    Returns the summaries to hand to the README prompt together with the
+    directories whose roll-up failed. ``summarize_directory`` does not raise:
+    it logs and returns a ``{"file_path": ..., "error": ...}`` placeholder,
+    exactly as ``summarize_file`` does. Unlike a file placeholder, which the CLI
+    partitions out before it reaches anything, a directory placeholder used to
+    be returned as *the* summary of that directory - so a single failed call
+    discarded every summary underneath it, and the ones underneath that, all the
+    way to the leaves.
+
+    A failed roll-up now falls back to the contents it was asked to condense.
+    That is longer than the summary would have been, and it is what the run
+    already paid for.
     """
-    if len(file_summaries) <= 15:
+    failures: List[SummaryFailure] = []
+
+    if len(file_summaries) <= ROLLUP_THRESHOLD:
         if progress and task_id is not None:
             progress.update(task_id, advance=1)
-        return file_summaries
-        
+        return file_summaries, failures
+
     tree = build_directory_tree(file_summaries)
-    
+
     from repo2readme.summarize.directory_summary import summarize_directory
-    
+
     def count_dirs(node):
         return 1 + sum(count_dirs(c) for c in node["children"].values())
-        
+
     total_dirs = count_dirs(tree) - 1 # excluding root
     if progress and task_id is not None:
         progress.update(task_id, total=total_dirs, completed=0)
-    
+
     def process_dir(node: Dict[str, Any]) -> Any:
         child_summaries = []
         for child_name, child_node in node["children"].items():
@@ -177,11 +198,11 @@ def generate_hierarchical_summaries(
                     child_summaries.extend(child_summary)
                 else:
                     child_summaries.append(child_summary)
-                
+
         contents = child_summaries + node["files"]
         if not contents:
             return None
-            
+
         if node["path"] == ".":
             return contents
 
@@ -189,7 +210,7 @@ def generate_hierarchical_summaries(
             if progress and task_id is not None:
                 progress.update(task_id, advance=1)
             return contents[0]
-            
+
         dir_summary = summarize_directory(
             dir_path=node["path"],
             contents_summaries=contents,
@@ -197,13 +218,31 @@ def generate_hierarchical_summaries(
             model_name=model,
             base_url=base_url
         )
-        
+
         if progress and task_id is not None:
             progress.update(task_id, advance=1)
-            
+
+        if is_failed_summary(dir_summary):
+            # Keep what the directory is made of. The parent flattens a list,
+            # so these travel upwards and are condensed at the next level if
+            # that call succeeds.
+            failures.append(
+                SummaryFailure(
+                    file_path=node["path"],
+                    reason=str(dir_summary.get("error")),
+                )
+            )
+            return contents
+
         return dir_summary
-        
+
     top_level_summaries = process_dir(tree)
+
+    if top_level_summaries is None:
+        # Nothing in the tree had a usable path. Returning [None] would put a
+        # bare null in the README prompt.
+        return [], failures
+
     if isinstance(top_level_summaries, list):
-        return top_level_summaries
-    return [top_level_summaries]
+        return top_level_summaries, failures
+    return [top_level_summaries], failures

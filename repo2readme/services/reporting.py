@@ -163,3 +163,50 @@ def render_report(
     """Print the report using ``printer`` (normally ``rich.print``)."""
     for line in build_report_lines(total, succeeded, failures):
         printer(line)
+
+
+def build_rollup_report_lines(
+    failures: Sequence[SummaryFailure],
+    max_paths_per_group: int = MAX_PATHS_PER_GROUP,
+) -> list[str]:
+    """Build the console report for directories whose roll-up failed.
+
+    Separate from :func:`build_report_lines` because the outcome is different:
+    a file that fails to summarize is missing from the README, while a directory
+    that fails to roll up is described by its contents instead. That is more
+    context than intended, not less, and it is worth saying so - the run is
+    otherwise complete and there is nothing to retry.
+
+    Returns an empty list when nothing failed.
+    """
+    if not failures:
+        return []
+
+    lines = [
+        "",
+        "[bold yellow]Directory summary report[/bold yellow]",
+        "",
+        f"Directories not condensed: {len(failures)}",
+        "",
+    ]
+
+    for group in group_failures(failures):
+        lines.append(f"[yellow]{group.count} director(y/ies):[/yellow] {group.reason}")
+        for path in group.file_paths[:max_paths_per_group]:
+            lines.append(f"    - {path}")
+        remaining = group.count - max_paths_per_group
+        if remaining > 0:
+            lines.append(f"    ... and {remaining} more")
+        lines.append("")
+
+    lines.append(
+        "[yellow]Their file summaries were used directly, so nothing was "
+        "lost.[/yellow]"
+    )
+    return lines
+
+
+def render_rollup_report(failures: Sequence[SummaryFailure], printer) -> None:
+    """Print the directory roll-up report using ``printer``."""
+    for line in build_rollup_report_lines(failures):
+        printer(line)

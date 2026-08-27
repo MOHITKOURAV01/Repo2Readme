@@ -146,7 +146,7 @@ def test_normal_run_user_confirms(monkeypatch, tmp_path):
         return [{"file_path": "main.py", "description": "fake summary"}], []
 
     def fake_generate_hierarchical_summaries(file_summaries, provider, model, base_url, progress, task_id):
-        return file_summaries
+        return file_summaries, []
 
     def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
         nonlocal workflow_called
@@ -196,7 +196,7 @@ def test_normal_run_force_bypasses_confirmation(monkeypatch, tmp_path):
         return [{"file_path": "main.py", "description": "fake summary"}], []
 
     def fake_generate_hierarchical_summaries(file_summaries, provider, model, base_url, progress, task_id):
-        return file_summaries
+        return file_summaries, []
 
     def fake_run_pipeline(summaries, tree, dependency_overview, provider, model, base_url):
         nonlocal workflow_called

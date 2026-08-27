@@ -31,7 +31,11 @@ from repo2readme.services.environment import setup_api_keys
 from repo2readme.services.estimation import format_size, estimate_analysis_cost
 from repo2readme.services.summarization import generate_all_summaries, generate_hierarchical_summaries
 from repo2readme.services.orchestrator import ReadmeGenerationError, run_pipeline
-from repo2readme.services.reporting import partition_summaries, render_report
+from repo2readme.services.reporting import (
+    partition_summaries,
+    render_report,
+    render_rollup_report,
+)
 from repo2readme.utils.workers import validate_max_workers
 
 
@@ -308,7 +312,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
 
         with Progress() as progress:
             rollup_task = progress.add_task("[cyan]Generating directory summaries...[/cyan]", total=1)
-            hierarchical_summaries = generate_hierarchical_summaries(
+            hierarchical_summaries, rollup_failures = generate_hierarchical_summaries(
                 file_summaries=successful_summaries,
                 provider=provider,
                 model=model,
@@ -316,6 +320,11 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
                 progress=progress,
                 task_id=rollup_task
             )
+
+        # A directory that could not be condensed is represented by its contents
+        # instead, so the run continues; say which ones, because the README
+        # prompt is longer than it was meant to be.
+        render_rollup_report(rollup_failures, rprint)
 
         # Remove cache entries for files that no longer exist
         current_files = {doc["metadata"]["file_path"] for doc in documents}

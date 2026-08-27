@@ -309,7 +309,7 @@ class TestCliDoesNotWriteAnEmptyReadme:
             cli_main, "generate_all_summaries", lambda **_kwargs: ([{"a": 1}], [])
         )
         monkeypatch.setattr(
-            cli_main, "generate_hierarchical_summaries", lambda **_kwargs: [{"a": 1}]
+            cli_main, "generate_hierarchical_summaries", lambda **_kwargs: ([{"a": 1}], [])
         )
 
         source = tmp_path / "repo"
