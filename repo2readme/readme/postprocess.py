@@ -10,7 +10,7 @@ rest instead of silently rewriting the model's content.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 # A fence that opens the document and closes it at the very end, e.g. the model
@@ -69,15 +69,22 @@ def github_anchor(heading: str) -> str:
     return text.strip().replace(" ", "-")
 
 
-def iter_prose_lines(text: str) -> Iterator[tuple[int, str]]:
-    """Yield ``(line_number, line)`` for lines outside fenced code blocks.
+def fenced_flags(lines: Sequence[str]) -> list[bool]:
+    """Mark every line that belongs to a fenced code block.
 
-    A usage section full of example Markdown must not be mistaken for the
-    document's own headings and links.
+    The fence delimiters count as part of the block, so a ``True`` run covers
+    the opening line, the code and the closing line. A fence is closed only by
+    the marker character that opened it, which is how a ``~~~`` block can
+    contain a line of backticks.
+
+    An unclosed fence runs to the end of the document. That is deliberate:
+    everything after it is code as far as anything can tell, and the validators
+    have always read it that way.
     """
+    flags: list[bool] = []
     fence: str | None = None
 
-    for number, line in enumerate(text.splitlines(), start=1):
+    for line in lines:
         match = _FENCE_LINE.match(line)
         if match:
             marker = match.group(1)[0]
@@ -85,9 +92,24 @@ def iter_prose_lines(text: str) -> Iterator[tuple[int, str]]:
                 fence = marker
             elif marker == fence:
                 fence = None
+            flags.append(True)
             continue
 
-        if fence is None:
+        flags.append(fence is not None)
+
+    return flags
+
+
+def iter_prose_lines(text: str) -> Iterator[tuple[int, str]]:
+    """Yield ``(line_number, line)`` for lines outside fenced code blocks.
+
+    A usage section full of example Markdown must not be mistaken for the
+    document's own headings and links.
+    """
+    lines = text.splitlines()
+
+    for number, (line, fenced) in enumerate(zip(lines, fenced_flags(lines)), start=1):
+        if not fenced:
             yield number, line
 
 
@@ -134,30 +156,81 @@ def strip_wrapping_code_fence(text: str) -> str:
     return "\n".join(inner)
 
 
+def normalize_prose_line(line: str, continues: bool = False) -> str:
+    """Strip trailing whitespace from one line of prose, keeping a hard break.
+
+    Two or more trailing spaces are Markdown's hard line break. Removing them
+    where one is doing its job is not whitespace cleanup - it joins two lines
+    into one paragraph - so the break is kept, normalised to the canonical two
+    spaces.
+
+    It only does its job in the middle of a paragraph, which is what
+    ``continues`` reports: the next line has to exist, be prose and not be
+    blank. Trailing spaces on a heading, or on the last line before a blank
+    line, a code fence or the end of the document, render as nothing and are
+    stripped like any other trailing whitespace.
+    """
+    stripped = line.rstrip()
+    if not stripped:
+        return ""
+
+    if not continues or _HEADING.match(stripped):
+        return stripped
+
+    trailing = line[len(stripped):]
+    if trailing.count(" ") >= 2:
+        return stripped + "  "
+
+    return stripped
+
+
 def normalize_markdown(text: str) -> str:
-    """Mechanical cleanup only: nothing here changes the document's meaning."""
+    """Mechanical cleanup only: nothing here changes the document's meaning.
+
+    Which is why none of it reaches inside a fenced code block. Trailing
+    whitespace is content in a ``diff`` block, where a blank context line is
+    two spaces; in a fixture or expected-output block, which exists to be
+    compared byte for byte; and in any snippet whose language cares. Blank runs
+    are the snippet's own formatting. The README's usage and installation
+    sections are made of these blocks, and the model was told to produce them
+    verbatim.
+    """
     if not text or not text.strip():
         return ""
 
     text = strip_wrapping_code_fence(text)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
 
-    lines = [line.rstrip() for line in text.split("\n")]
+    lines = text.split("\n")
+    fenced_lines = fenced_flags(lines)
 
     collapsed: list[str] = []
     blanks = 0
-    for line in lines:
-        if line:
+    for index, (line, fenced) in enumerate(zip(lines, fenced_lines)):
+        if fenced:
             blanks = 0
             collapsed.append(line)
             continue
+
+        following = index + 1
+        continues = (
+            following < len(lines)
+            and not fenced_lines[following]
+            and bool(lines[following].strip())
+        )
+        normalized = normalize_prose_line(line, continues=continues)
+        if normalized:
+            blanks = 0
+            collapsed.append(normalized)
+            continue
+
         blanks += 1
         if blanks <= BLANK_LINE_LIMIT:
-            collapsed.append(line)
+            collapsed.append(normalized)
 
-    while collapsed and not collapsed[0]:
+    while collapsed and not collapsed[0].strip():
         collapsed.pop(0)
-    while collapsed and not collapsed[-1]:
+    while collapsed and not collapsed[-1].strip():
         collapsed.pop()
 
     return "\n".join(collapsed) + "\n"
