@@ -184,43 +184,168 @@ class DependencyGraph:
 # Lightweight import parsers
 # ---------------------------------------------------------------------------
 
-def _package_roots(files_map: dict[str, str]) -> tuple[str, ...]:
-    """
-    Every directory prefix appearing in ``files_map``, sorted.
+def _parent(directory: str) -> str:
+    """The directory containing ``directory``, or ``""`` at the top."""
+    return directory.rpartition("/")[0]
 
-    Used as candidate roots for absolute package imports. Computed once per
-    graph build and passed down: derived per import, it re-walked every path in
-    the repository for every import statement in every file.
+
+def _directories(files_map: dict[str, str]) -> set[str]:
+    """Every directory prefix appearing in ``files_map``.
 
     The prefixes are built by walking up from each file's directory. Building
     them by prepending a separator to each path segment produced "//repo" for
     the leading empty segment of an absolute path, so no candidate ever matched
-    and this fallback never resolved anything.
+    and the fallback below never resolved anything.
     """
-    roots: set[str] = set()
+    directories: set[str] = set()
     for path in files_map:
-        directory = path.rpartition("/")[0]
-        while directory and directory not in roots:
-            roots.add(directory)
-            directory = directory.rpartition("/")[0]
-    return tuple(sorted(roots))
+        directory = _parent(path)
+        while directory and directory not in directories:
+            directories.add(directory)
+            directory = _parent(directory)
+    return directories
+
+
+def _regular_packages(files_map: dict[str, str]) -> set[str]:
+    """Directories holding an ``__init__.py``.
+
+    A directory with one is a regular package: its modules are imported through
+    the package name, never on their own, so the directory itself is not
+    somewhere an import can start from. PEP 420 namespace packages have no
+    marker file and are therefore invisible here, which is why the last-resort
+    branch in :func:`_resolve_python_import` is kept.
+    """
+    return {
+        _parent(path)
+        for path in files_map
+        if path.endswith("/__init__.py")
+    }
+
+
+def _inside_package(directory: str, packages: set[str]) -> bool:
+    """Whether ``directory`` is a regular package, or sits under one.
+
+    Neither is a place an import can start from: a package's modules are
+    reached through the package name, and that stays true however many
+    non-package directories sit in between.
+    """
+    candidate = directory
+    while candidate:
+        if candidate in packages:
+            return True
+        candidate = _parent(candidate)
+    return False
+
+
+def _repository_root(directories: set[str]) -> str:
+    """The deepest directory that contains every path in the tree."""
+    if not directories:
+        return ""
+
+    segments = [directory.split("/") for directory in directories]
+    shortest = min(segments, key=len)
+
+    common: list[str] = []
+    for index, part in enumerate(shortest):
+        if all(candidate[index] == part for candidate in segments):
+            common.append(part)
+        else:
+            break
+
+    return "/".join(common)
+
+
+@dataclass(frozen=True)
+class PythonRoots:
+    """Where an absolute Python import may be resolved from.
+
+    ``import_roots``
+        Directories that could genuinely be on ``sys.path``: the parent of each
+        top-level regular package, plus the repository root. ``import mypkg.core``
+        works because the directory *holding* ``mypkg`` is on the path, so that
+        parent is the root - and a directory that is itself a package never is.
+
+    ``fallback_roots``
+        Every remaining directory that is not inside a regular package. Only
+        dotted imports are resolved against these, and only after everything
+        above has failed. See :func:`_resolve_python_import` for why the branch
+        survives at all.
+    """
+
+    import_roots: tuple[str, ...] = ()
+    fallback_roots: tuple[str, ...] = ()
+
+
+def python_roots(files_map: dict[str, str]) -> PythonRoots:
+    """Classify the directories in ``files_map`` as import roots.
+
+    Computed once per graph build and passed down: derived per import, it
+    re-walked every path in the repository for every import statement in every
+    file.
+    """
+    directories = _directories(files_map)
+    packages = _regular_packages(files_map)
+
+    roots = {
+        _parent(package)
+        for package in packages
+        if _parent(package) not in packages
+    }
+    roots.discard("")
+    roots.add(_repository_root(directories))
+    roots.discard("")
+
+    fallback = {
+        directory
+        for directory in directories
+        if directory not in roots and not _inside_package(directory, packages)
+    }
+
+    return PythonRoots(
+        import_roots=tuple(sorted(roots)),
+        fallback_roots=tuple(sorted(fallback)),
+    )
+
+
+def _module_candidates(root: str, module_path: str) -> tuple[str, str]:
+    """The package and the module a dotted name could name under ``root``."""
+    relative = module_path.replace(".", "/")
+    return f"{root}/{relative}/__init__.py", f"{root}/{relative}.py"
 
 
 def _resolve_python_import(
     source_file: str,
     import_path: str,
     files_map: dict[str, str],
-    package_roots: tuple[str, ...] | None = None,
+    roots: PythonRoots | None = None,
 ) -> Optional[str]:
     """
     Attempt to resolve a Python import to an actual file path.
+
+    Absolute imports are tried against, in order, the importing file's own
+    directory, the repository's import roots, and - for dotted names only - any
+    remaining directory that is not inside a package.
+
+    That last branch used to be the whole of it: every directory prefix in the
+    repository was a candidate, for every import. A bare name then bound to
+    whatever file of that name happened to exist anywhere in the tree, so
+    ``import utils`` in one service resolved to another service's ``utils.py``
+    and ``import json`` resolved to a repository file called ``json.py``. A
+    single-segment name carries no path shape to check against and is no longer
+    resolved that way.
+
+    A dotted name does carry one - ``a.b.c`` only matches a root that really
+    has ``a/b/c.py`` beneath it - and it is the one thing that still finds a
+    PEP 420 namespace package, which has no ``__init__.py`` to be recognised
+    by. It is kept for that, last and narrowed to directories no package
+    encloses.
 
     Args:
         source_file: Absolute path of the file containing the import
         import_path: The module path being imported (e.g., "os", "utils.helpers")
         files_map: Mapping from normalized file paths to absolute paths
-        package_roots: Precomputed directory prefixes from ``files_map``.
-            Derived on demand when omitted.
+        roots: Precomputed roots for ``files_map``. Derived on demand when
+            omitted.
 
     Returns:
         Resolved absolute file path, or None if not found
@@ -266,25 +391,27 @@ def _resolve_python_import(
                 return candidate
         return None
 
-    # Absolute package import (e.g. src.utils.helpers from src/main.py)
-    # First try relative to source file's directory
+    # Absolute import. The importing file's own directory comes first: it is
+    # what running the file as a script puts on sys.path, and it cannot reach
+    # across the tree into an unrelated one.
     module_path = import_path
-    for candidate in [
-        f"{base_dir}/{module_path.replace('.', '/')}/__init__.py",
-        f"{base_dir}/{module_path.replace('.', '/')}.py",
-    ]:
+    for candidate in _module_candidates(base_dir, module_path):
         if candidate in files_map:
             return candidate
 
-    # Then try candidate package roots from files_map
-    if package_roots is None:
-        package_roots = _package_roots(files_map)
+    if roots is None:
+        roots = python_roots(files_map)
 
-    for root in package_roots:
-        for candidate in [
-            f"{root}/{module_path.replace('.', '/')}/__init__.py",
-            f"{root}/{module_path.replace('.', '/')}.py",
-        ]:
+    for root in roots.import_roots:
+        for candidate in _module_candidates(root, module_path):
+            if candidate in files_map:
+                return candidate
+
+    if "." not in module_path:
+        return None
+
+    for root in roots.fallback_roots:
+        for candidate in _module_candidates(root, module_path):
             if candidate in files_map:
                 return candidate
 
@@ -512,7 +639,7 @@ def build_dependency_graph(documents: list[dict]) -> DependencyGraph:
 
     # Candidate roots for absolute package imports, walked once for the whole
     # graph rather than once per import statement.
-    package_roots = _package_roots(files_map)
+    roots = python_roots(files_map)
 
     # Process each file
     for doc in documents:
@@ -531,7 +658,7 @@ def build_dependency_graph(documents: list[dict]) -> DependencyGraph:
             # Register source node so isolated Python files are tracked
             graph.nodes.add(source_file)
             imports = _parse_python_imports(content)
-            resolver = partial(_resolve_python_import, package_roots=package_roots)
+            resolver = partial(_resolve_python_import, roots=roots)
         elif language in ("javascript", "typescript"):
             # Register source node so isolated JS/TS files are tracked
             graph.nodes.add(source_file)

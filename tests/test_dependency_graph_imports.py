@@ -13,11 +13,11 @@ the real target is found.
 
 from repo2readme.dependency_graph import (
     _imported_names,
-    _package_roots,
     _parse_js_imports,
     _parse_python_imports,
     _resolve_python_import,
     build_dependency_graph,
+    python_roots,
 )
 
 
@@ -157,21 +157,55 @@ class TestResolveRelativeImports:
 
 
 class TestPackageRoots:
-    def test_collects_every_directory_prefix(self):
-        roots = _package_roots(_files("/repo/src/utils/helpers.py"))
+    """Roots are classified now, not just collected (issue #174).
 
-        assert roots == ("/repo", "/repo/src", "/repo/src/utils")
+    ``import_roots`` are the directories that could genuinely be on
+    ``sys.path``; ``fallback_roots`` are the rest, and only a dotted name is
+    ever resolved against those.
+    """
+
+    def test_a_repository_without_packages_has_only_its_root(self):
+        roots = python_roots(_files("/repo/src/utils/helpers.py"))
+
+        assert roots.import_roots == ("/repo",)
+        assert roots.fallback_roots == ("/repo/src", "/repo/src/utils")
+
+    def test_the_parent_of_a_top_level_package_is_an_import_root(self):
+        roots = python_roots(
+            _files(
+                "/repo/src/mypkg/__init__.py",
+                "/repo/src/mypkg/core.py",
+                "/repo/setup.py",
+            )
+        )
+
+        assert roots.import_roots == ("/repo", "/repo/src")
+        # Nothing inside the package can be a root of its own.
+        assert roots.fallback_roots == ()
+
+    def test_a_nested_package_is_not_a_root(self):
+        roots = python_roots(
+            _files(
+                "/repo/pkg/__init__.py",
+                "/repo/pkg/sub/__init__.py",
+                "/repo/pkg/sub/mod.py",
+            )
+        )
+
+        assert roots.import_roots == ("/repo",)
+        assert roots.fallback_roots == ()
 
     def test_is_sorted_and_deduplicated(self):
-        roots = _package_roots(_files("/repo/b/x.py", "/repo/a/y.py", "/repo/a/z.py"))
+        roots = python_roots(_files("/repo/b/x.py", "/repo/a/y.py", "/repo/a/z.py"))
 
-        assert roots == ("/repo", "/repo/a", "/repo/b")
+        assert roots.import_roots == ("/repo",)
+        assert roots.fallback_roots == ("/repo/a", "/repo/b")
 
     def test_precomputed_roots_give_the_same_answer_as_deriving_them(self):
         files_map = _files("/repo/src/utils/helpers.py")
 
         with_roots = _resolve_python_import(
-            "/repo/main.py", "utils.helpers", files_map, _package_roots(files_map)
+            "/repo/main.py", "utils.helpers", files_map, python_roots(files_map)
         )
         without_roots = _resolve_python_import(
             "/repo/main.py", "utils.helpers", files_map
