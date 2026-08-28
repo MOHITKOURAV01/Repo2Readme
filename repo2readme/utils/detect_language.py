@@ -11,63 +11,217 @@ Detection order:
 
 import os
 import re
+from dataclasses import dataclass
 from typing import Optional
 
 # ---------------------------------------------------------------------------
 # 1. EXTENSION → LANGUAGE MAP (existing, unchanged)
 # ---------------------------------------------------------------------------
 EXTENSION_LANGUAGE_MAP: dict[str, str] = {
-    # Programming Languages
+    # --- Python
     ".py": "python",
+    ".pyi": "python",
+    ".pyw": "python",
+    ".pyx": "cython",
+    ".pxd": "cython",
+    # --- JavaScript / TypeScript
+    #
+    # .mjs and .cjs were missing here while dependency_graph resolved imports
+    # in both, so the two tables disagreed about the same file. They are shared
+    # now: see language_for_extension.
     ".js": "javascript",
     ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
     ".ts": "typescript",
     ".tsx": "typescript",
+    ".mts": "typescript",
+    ".cts": "typescript",
+    # --- Component frameworks
+    ".vue": "vue",
+    ".svelte": "svelte",
+    ".astro": "astro",
+    # --- C family
+    #
+    # A .h can be C, C++ or Objective-C and nothing in the name says which.
+    # Linguist calls it C, which is the safe answer: the summarizer is being
+    # told what kind of file it is looking at, and "c" is right about the
+    # syntax either way.
+    ".c": "c",
+    ".h": "c",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".cxx": "cpp",
+    ".c++": "cpp",
+    ".hpp": "cpp",
+    ".hh": "cpp",
+    ".hxx": "cpp",
+    ".ipp": "cpp",
+    ".m": "objective-c",
+    ".mm": "objective-cpp",
+    ".cs": "csharp",
+    ".csx": "csharp",
+    # --- JVM
     ".java": "java",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
+    ".scala": "scala",
+    ".sc": "scala",
+    ".groovy": "groovy",
+    ".gradle": "groovy",
+    ".clj": "clojure",
+    ".cljs": "clojure",
+    ".cljc": "clojure",
+    ".edn": "clojure",
+    # --- Systems
     ".go": "go",
     ".rs": "rust",
-    ".cpp": "cpp",
-    ".c": "c",
-    ".cs": "csharp",
-    ".php": "php",
+    ".zig": "zig",
+    ".nim": "nim",
+    ".d": "d",
+    ".v": "v",
+    ".swift": "swift",
+    # --- Functional
+    ".hs": "haskell",
+    ".lhs": "haskell",
+    ".ml": "ocaml",
+    ".mli": "ocaml",
+    ".ex": "elixir",
+    ".exs": "elixir",
+    ".erl": "erlang",
+    ".hrl": "erlang",
+    ".elm": "elm",
+    ".fs": "fsharp",
+    ".fsx": "fsharp",
+    ".purs": "purescript",
+    ".scm": "scheme",
+    ".rkt": "racket",
+    ".lisp": "lisp",
+    ".el": "lisp",
+    # --- Scripting
     ".rb": "ruby",
+    ".rake": "ruby",
+    ".gemspec": "ruby",
+    ".php": "php",
     ".pl": "perl",
+    ".pm": "perl",
+    ".lua": "lua",
+    ".tcl": "tcl",
+    ".r": "r",
+    ".jl": "julia",
+    ".dart": "dart",
+    ".cr": "crystal",
     ".sh": "bash",
     ".bash": "bash",
     ".zsh": "bash",
     ".fish": "bash",
+    ".ksh": "bash",
     ".ps1": "powershell",
-    ".swift": "swift",
-    ".kt": "kotlin",
-    ".scala": "scala",
-    ".r": "r",
-    # Markdown / documentation
+    ".psm1": "powershell",
+    ".psd1": "powershell",
+    ".bat": "batch",
+    ".cmd": "batch",
+    ".awk": "awk",
+    ".vb": "vbnet",
+    ".pas": "pascal",
+    ".f90": "fortran",
+    ".f95": "fortran",
+    ".sol": "solidity",
+    # --- Interface and schema definitions, which a README is usually about
+    ".proto": "protobuf",
+    ".graphql": "graphql",
+    ".gql": "graphql",
+    ".thrift": "thrift",
+    ".capnp": "capnproto",
+    ".avsc": "avro",
+    ".prisma": "prisma",
+    ".sql": "sql",
+    # --- Infrastructure
+    ".tf": "terraform",
+    ".tfvars": "terraform",
+    ".hcl": "hcl",
+    ".bicep": "bicep",
+    ".nix": "nix",
+    # --- Markdown / documentation
     ".md": "markdown",
     ".markdown": "markdown",
+    ".mdx": "mdx",
     ".rst": "rst",
-    # Data / config
+    ".adoc": "asciidoc",
+    ".asciidoc": "asciidoc",
+    ".org": "org",
+    ".tex": "tex",
+    ".bib": "bibtex",
+    # --- Data / config
     ".json": "json",
+    ".jsonc": "json",
+    ".json5": "json",
     ".yaml": "yaml",
     ".yml": "yaml",
     ".toml": "toml",
     ".ini": "ini",
     ".cfg": "ini",
     ".conf": "ini",
+    ".properties": "ini",
     ".xml": "xml",
+    ".xsd": "xml",
+    ".plist": "xml",
     ".csv": "csv",
-    # Web
+    ".tsv": "tsv",
+    # --- Web
     ".html": "html",
+    ".htm": "html",
+    ".xhtml": "html",
     ".css": "css",
     ".scss": "scss",
+    ".sass": "sass",
     ".less": "less",
-    # Shell / build
-    ".bat": "batch",
-    ".cmd": "batch",
-    ".gradle": "groovy",
-    ".groovy": "groovy",
-    ".sql": "sql",
-    ".dockerignore": "dockerfile",
+    ".styl": "stylus",
+    ".pug": "pug",
+    ".hbs": "handlebars",
+    ".ejs": "ejs",
+    ".twig": "twig",
+    ".liquid": "liquid",
+    ".njk": "nunjucks",
+    # --- Dotfiles. splitext gives a leading-dot basename no extension, so the
+    # whole name is the lookup key; see _detect_by_extension.
+    ".bashrc": "bash",
+    ".zshrc": "bash",
+    ".bash_profile": "bash",
+    ".profile": "bash",
+    ".envrc": "bash",
+    ".editorconfig": "ini",
+    ".gitmodules": "ini",
+    ".babelrc": "json",
+    ".eslintrc": "json",
+    ".prettierrc": "json",
+    ".stylelintrc": "json",
+    # An ignore file is a list of globs. ".dockerignore" used to be mapped to
+    # "dockerfile", which it shares no syntax with; Linguist groups the whole
+    # family as one thing instead.
+    ".gitignore": "gitignore",
+    ".dockerignore": "gitignore",
+    ".npmignore": "gitignore",
+    ".eslintignore": "gitignore",
+    ".prettierignore": "gitignore",
 }
+
+
+# Languages the dependency graph knows how to parse imports for. Kept here so
+# there is one table, rather than one per module that needs to ask.
+PARSEABLE_LANGUAGES = frozenset({"python", "javascript", "typescript"})
+
+
+def language_for_extension(extension: str) -> str:
+    """Language for a file extension, or ``""`` when it is not in the table.
+
+    The lookup other modules should use, so a new extension is added in one
+    place. ``dependency_graph`` carried its own copy that had ``.mjs`` and
+    ``.cjs`` in it while this one did not, and the two disagreed about the same
+    file.
+    """
+    return EXTENSION_LANGUAGE_MAP.get(extension.lower(), "")
+
 
 # ---------------------------------------------------------------------------
 # 2. FILENAME → LANGUAGE MAP (for common extensionless files)
@@ -95,6 +249,15 @@ FILENAME_LANGUAGE_MAP: dict[str, str] = {
     "appfile": "ruby",
     "matchfile": "ruby",
     "pluginfile": "ruby",
+    "berksfile": "ruby",
+    "thorfile": "ruby",
+    "dangerfile": "ruby",
+    "gnumakefile": "makefile",
+    "makefile.am": "makefile",
+    "makefile.in": "makefile",
+    "meson.build": "meson",
+    "build": "bazel",
+    "workspace": "bazel",
 }
 
 # ---------------------------------------------------------------------------
@@ -179,40 +342,66 @@ SHEBANG_PATTERNS: list[tuple[re.Pattern, str]] = [
 # More specific markers should come first for each language.
 # Shared keywords (e.g. `def`, `class`) are omitted to avoid false positives
 # between similar-looking languages. Instead we use more distinctive tokens.
-CONTENT_RULES: list[tuple[str, list[str]]] = [
+@dataclass(frozen=True)
+class ContentRule:
+    """Markers that suggest a language, and how many have to be present.
+
+    The threshold is per rule because the rules are not equally strong. Two
+    markers is enough for Python's ``if __name__ ==`` and ``self.``; it was far
+    too little for the JSON rule, which listed ``{``, ``[``, ``"``, ``: `` and
+    ``}`` and so matched almost any source file in any language.
+    """
+
+    language: str
+    markers: tuple[str, ...]
+    minimum: int = 2
+
+    def score(self, sample: str) -> int:
+        return sum(1 for marker in self.markers if marker in sample)
+
+    def matches(self, sample: str) -> bool:
+        return self.score(sample) >= self.minimum
+
+
+CONTENT_RULES: tuple[ContentRule, ...] = (
     # Dockerfile
-    ("dockerfile", ["FROM ", "RUN ", "COPY ", "CMD ", "ENTRYPOINT "]),
+    ContentRule("dockerfile", ("FROM ", "RUN ", "COPY ", "CMD ", "ENTRYPOINT ")),
     # Python
-    (
+    ContentRule(
         "python",
-        ["if __name__ ==", "import ", "from ", "self.", "def ", "class "],
+        ("if __name__ ==", "import ", "from ", "self.", "def ", "class "),
     ),
     # TypeScript
-    ("typescript", ["interface ", "implements ", "readonly ", "type "]),
+    ContentRule("typescript", ("interface ", "implements ", "readonly ", "type ")),
     # JavaScript (less specific than TypeScript, so listed after)
-    (
+    ContentRule(
         "javascript",
-        ["module.exports", "require(", "=>", "const ", "let ", "function "],
+        ("module.exports", "require(", "=>", "const ", "let ", "function "),
     ),
     # Shell
-    ("bash", ["#!/", "echo ", "export ", " fi\n", "\nfi\n", "then ", "done ", "else "]),
+    ContentRule(
+        "bash",
+        ("#!/", "echo ", "export ", " fi\n", "\nfi\n", "then ", "done ", "else "),
+    ),
     # YAML
-    ("yaml", ["---\n", ":\n  ", "  - ", ": "]),
-    # JSON
-    ("json", ["{", "[", '"', ": ", "}"]),
+    ContentRule("yaml", ("---\n", ":\n  ", "  - ", ": ")),
+    # JSON. The markers name JSON's own punctuation pairs rather than the
+    # individual characters: a brace and a quote appear in every C-like
+    # language, but `{"` and `": ` do not.
+    ContentRule("json", ('{"', '["', '": ', '":', "},", "],", ', "')),
     # Markdown
-    ("markdown", ["# ", "## ", "```", "---"]),
+    ContentRule("markdown", ("# ", "## ", "```", "---")),
     # Groovy / Jenkinsfile
-    ("groovy", ["pipeline {", "stages {", "stage(", "agent "]),
+    ContentRule("groovy", ("pipeline {", "stages {", "stage(", "agent ")),
     # Makefile
-    ("makefile", ["CC=", "CFLAGS=", "LDFLAGS=", "$@", "$<", ":=", "PHONY"]),
+    ContentRule("makefile", ("CC=", "CFLAGS=", "LDFLAGS=", "$@", "$<", ":=", "PHONY")),
     # Ruby
-    ("ruby", ["require ", "gem ", "puts ", "end\n", "module ", "class "]),
+    ContentRule("ruby", ("require ", "gem ", "puts ", "end\n", "module ", "class ")),
     # Perl
-    ("perl", ["use strict", "use warnings", "my $", 'print "']),
+    ContentRule("perl", ("use strict", "use warnings", "my $", 'print "')),
     # PHP
-    ("php", ["<?php", "function ", "echo ", "$this->"]),
-]
+    ContentRule("php", ("<?php", "function ", "echo ", "$this->")),
+)
 
 # Maximum bytes to read for content-based detection
 _MAX_CONTENT_BYTES = 8192
@@ -238,7 +427,7 @@ def _detect_by_extension(path: str) -> Optional[str]:
     if not extension and basename.startswith("."):
         extension = basename
 
-    return EXTENSION_LANGUAGE_MAP.get(extension.lower(), None)
+    return language_for_extension(extension) or None
 
 
 def _detect_by_filename(path: str) -> Optional[str]:
@@ -288,15 +477,9 @@ def _detect_by_content(content: str) -> Optional[str]:
     # Limit content to avoid scanning large files
     sample = content[:_MAX_CONTENT_BYTES]
 
-    for language, markers in CONTENT_RULES:
-        score = 0
-        for marker in markers:
-            if marker in sample:
-                score += 1
-
-        # Require at least 2 markers to match
-        if score >= 2:
-            return language
+    for rule in CONTENT_RULES:
+        if rule.matches(sample):
+            return rule.language
 
     return None
 

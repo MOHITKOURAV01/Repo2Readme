@@ -38,8 +38,13 @@ class TestExtensionDetection:
         assert _detect_by_extension(".MD") == "markdown"
 
     def test_dotfile_as_extension(self):
-        assert _detect_by_extension(".gitignore") is None
-        assert _detect_by_extension(".dockerignore") == "dockerfile"
+        # A dotfile's whole basename is its lookup key. The ignore-file family
+        # is one language: ".dockerignore" used to be mapped to "dockerfile",
+        # which it shares no syntax with.
+        assert _detect_by_extension(".gitignore") == "gitignore"
+        assert _detect_by_extension(".dockerignore") == "gitignore"
+        assert _detect_by_extension(".editorconfig") == "ini"
+        assert _detect_by_extension(".unknownrc") is None
 
     def test_unknown_extension(self):
         assert _detect_by_extension(".xyz") is None

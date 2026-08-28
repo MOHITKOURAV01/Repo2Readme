@@ -138,13 +138,20 @@ class TestPipelineCarriesLanguage:
         assert resolve_language(metadata, body) == expected
 
     def test_jenkinsfile_is_no_longer_summarized_as_json(self, tmp_path):
-        """The extension-only path matched the JSON marker set on `{`, `"`, `}`."""
+        """The extension-only path matched the JSON marker set on `{`, `"`, `}`.
+
+        It no longer does - the JSON rule names JSON's punctuation pairs now,
+        not the individual characters (issue #177) - so the extension-only path
+        falls through to the Groovy rule instead of claiming JSON. The point of
+        this test is unchanged: what the pipeline carries is the right answer,
+        arrived at from the whole path rather than the bare extension.
+        """
         body = "pipeline {\n  agent any\n  stages {\n    stage('b') { sh 'make' }\n  }\n}\n"
         (tmp_path / "Jenkinsfile").write_text(body, encoding="utf-8")
         documents, _ = TraversalPipeline(folder_path=str(tmp_path)).run()
 
         metadata = dict(documents[0].metadata)
-        assert detect_lang(metadata["file_type"], body) == "json"  # the old answer
+        assert detect_lang(metadata["file_type"], body) != "json"
         assert resolve_language(metadata, body) == "groovy"
 
     def test_every_document_has_a_language(self, tmp_path):
@@ -323,15 +330,18 @@ class TestSummarizationUsesTheDetectedLanguage:
 
 
 class TestDotfileExtensionDetection:
+    # ".dockerignore" is a list of globs, not Dockerfile syntax, and maps to
+    # the ignore-file language now (issue #177). What is under test here is the
+    # dotfile lookup itself, which is unchanged.
     def test_bare_filename(self):
-        assert detect_lang(".dockerignore") == "dockerfile"
+        assert detect_lang(".dockerignore") == "gitignore"
 
     def test_relative_path(self):
-        assert detect_lang("app/.dockerignore") == "dockerfile"
+        assert detect_lang("app/.dockerignore") == "gitignore"
 
     def test_absolute_path(self):
         """The rule compared the whole path against ".", so this used to miss."""
-        assert detect_lang("/tmp/clone/app/.dockerignore") == "dockerfile"
+        assert detect_lang("/tmp/clone/app/.dockerignore") == "gitignore"
 
     def test_windows_style_path(self):
         assert detect_lang(".dockerignore") == detect_lang("app/.dockerignore")

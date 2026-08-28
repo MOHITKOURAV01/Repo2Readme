@@ -17,6 +17,11 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Optional
 
+from repo2readme.utils.detect_language import (
+    PARSEABLE_LANGUAGES,
+    language_for_extension,
+)
+
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -556,17 +561,16 @@ def build_dependency_graph(documents: list[dict]) -> DependencyGraph:
 
 
 def _detect_language_from_ext(file_type: str) -> str:
-    """Detect language from file extension."""
-    ext_map = {
-        ".py": "python",
-        ".js": "javascript",
-        ".jsx": "javascript",
-        ".ts": "typescript",
-        ".tsx": "typescript",
-        ".mjs": "javascript",
-        ".cjs": "javascript",
-    }
-    return ext_map.get(file_type.lower(), "")
+    """Language for an extension, or ``""`` when there is no import parser.
+
+    This used to be a table of its own, and the two drifted: it listed ``.mjs``
+    and ``.cjs`` while the language detector did not, so the same file was
+    JavaScript here and Python there. Both read the one table now, and this
+    narrows the answer to the languages ``build_dependency_graph`` can actually
+    parse imports for.
+    """
+    language = language_for_extension(file_type)
+    return language if language in PARSEABLE_LANGUAGES else ""
 
 
 # ---------------------------------------------------------------------------
