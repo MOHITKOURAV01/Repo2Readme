@@ -291,11 +291,38 @@ with SummaryCache(cache_dir, config, prompt_hash, autosave=False) as cache:
 ```
 
 `cache.stats()` reports hits, misses, in-memory updates, removals,
-invalidations and how many times the file was actually rewritten.
+invalidations, how many times the file was actually rewritten, and how many
+entries were discarded as unusable when the file was loaded.
 
 ### Corruption handling
 
-If the cache file becomes corrupted (e.g., invalid JSON), `repo2readme` logs a warning and automatically rebuilds the cache. Execution continues normally.
+Damage is handled at the smallest scope that makes sense for it.
+
+**A damaged entry costs one file.** An entry that is not a dictionary, is
+missing one of its five fields, or has no usable `file_path` is dropped; every
+other entry in the file is kept and still serves its cache hits. Entries are
+independently keyed and independently re-checked on lookup — the content hash,
+the language and the configuration hash are all verified before a summary is
+returned — so a well-formed entry next to a broken one is not itself suspect.
+
+The cleaned entry list is written back on the next flush, so the same damage is
+reported once rather than on every future run.
+
+```
+WARNING  Discarding cache entry 57: missing fields: mtime
+WARNING  Discarded 1 unusable cache entry, kept 199
+```
+
+Run with `-v` to see these.
+
+**A damaged file is rebuilt.** Invalid JSON, an unreadable file, a root that is
+not an object, or a missing `schema_version`, `config_hash` or `entries` list
+means the whole file goes. This part really is all-or-nothing: the configuration
+hash is what answers "were these summaries produced by the settings in use
+now?", and a file that has lost it cannot be trusted an entry at a time either.
+
+Either way the run continues; the cache is an optimisation, and losing it costs
+time rather than correctness.
 
 ### Adding the cache directory to `.gitignore`
 

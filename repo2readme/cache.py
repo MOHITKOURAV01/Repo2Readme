@@ -16,6 +16,11 @@ CACHE_SCHEMA_VERSION = "1.0"
 # once at the end, which is where the quadratic cost actually mattered.
 DEFAULT_AUTOSAVE_EVERY = 1
 
+# How many individually unusable entries are named in the log before the rest
+# are summarised. A cache damaged wholesale should not produce one warning line
+# per entry, but the first few are what makes the cause identifiable.
+MAX_LOGGED_DISCARDS = 5
+
 # Expected fields for each cache entry
 EXPECTED_ENTRY_FIELDS = {
     "file_path",
@@ -26,11 +31,15 @@ EXPECTED_ENTRY_FIELDS = {
 }
 
 
-def _validate_cache_structure(data: Any) -> bool:
+def _validate_cache_shell(data: Any) -> bool:
     """
-    Validate that the loaded cache data has the expected structure.
+    Whether the cache file's own structure is usable, ignoring its entries.
 
-    Returns True if valid, False otherwise.
+    This part genuinely is all-or-nothing. Without a root object, a schema
+    version, a configuration hash and a list to hold the entries, there is no
+    way to tell whether any entry is still valid - the config hash is what
+    answers "were these summaries produced by the settings in use now?", and a
+    file that has lost it cannot be trusted a file-at-a-time either.
     """
     if not isinstance(data, dict):
         logger.warning("Cache root is not a dictionary, got %s", type(data).__name__)
@@ -51,18 +60,70 @@ def _validate_cache_structure(data: Any) -> bool:
         )
         return False
 
-    for i, entry in enumerate(entries):
-        if not isinstance(entry, dict):
-            logger.warning("Cache entry %d is not a dictionary, got %s", i, type(entry).__name__)
-            return False
-        missing = EXPECTED_ENTRY_FIELDS - set(entry.keys())
-        if missing:
-            logger.warning(
-                "Cache entry %d missing fields: %s", i, ", ".join(sorted(missing))
-            )
-            return False
-
     return True
+
+
+def entry_problem(entry: Any) -> str | None:
+    """Why ``entry`` is unusable, or ``None`` if it is fine."""
+    if not isinstance(entry, dict):
+        return f"not a dictionary, got {type(entry).__name__}"
+
+    missing = EXPECTED_ENTRY_FIELDS - set(entry.keys())
+    if missing:
+        return f"missing fields: {', '.join(sorted(missing))}"
+
+    if not isinstance(entry.get("file_path"), str) or not entry["file_path"]:
+        return "'file_path' is not a usable string"
+
+    return None
+
+
+def partition_entries(entries: list) -> tuple[list[dict], list[tuple[int, str]]]:
+    """
+    Split loaded entries into the usable ones and the ones to discard.
+
+    Returns ``(usable, discarded)`` where ``discarded`` holds ``(index,
+    reason)`` pairs, so the log can say what was wrong without repeating the
+    check.
+
+    A damaged entry costs the file it describes, and nothing more. Every entry
+    is independently keyed and independently re-checked at lookup time - ``get``
+    verifies the content hash, the language and the configuration hash before it
+    returns anything - so a well-formed entry sitting next to a broken one is
+    not itself suspect. Rejecting the whole file for one bad entry threw away
+    hundreds of summaries that had each been paid for with an API call.
+    """
+    usable: list[dict] = []
+    discarded: list[tuple[int, str]] = []
+
+    for index, entry in enumerate(entries):
+        problem = entry_problem(entry)
+        if problem is None:
+            usable.append(entry)
+        else:
+            discarded.append((index, problem))
+
+    return usable, discarded
+
+
+def _validate_cache_structure(data: Any) -> bool:
+    """
+    Whether the loaded cache data is entirely well-formed.
+
+    Retained as the answer to "is this file completely clean?", which is what
+    it has always meant. It is no longer what decides whether the cache is
+    usable: a file with one bad entry among many is not clean, but it is very
+    much usable. :meth:`SummaryCache._load` asks
+    :func:`_validate_cache_shell` and :func:`partition_entries` instead.
+    """
+    if not _validate_cache_shell(data):
+        return False
+
+    _, discarded = partition_entries(data["entries"])
+    for index, problem in discarded:
+        logger.warning("Cache entry %d %s", index, problem)
+
+    return not discarded
 
 
 class SummaryCache:
@@ -126,6 +187,7 @@ class SummaryCache:
             "invalidations": 0,
             "disk_writes": 0,
             "write_failures": 0,
+            "discarded_entries": 0,
         }
 
     # ------------------------------------------------------------------
@@ -179,7 +241,8 @@ class SummaryCache:
         """
         Counters for the current process: cache hits and misses, in-memory
         updates and removals, invalidations, how many times the file was
-        actually rewritten, and how many writes failed.
+        actually rewritten, how many writes failed, and how many entries were
+        discarded as unusable when the file was loaded.
         """
         with self._lock, self._io_lock:
             return dict(self._stats)
@@ -237,13 +300,46 @@ class SummaryCache:
             with open(self.cache_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            if not _validate_cache_structure(data):
+            if not _validate_cache_shell(data):
                 logger.warning("Cache structure validation failed, rebuilding")
                 self._rebuild()
                 return
 
+            usable, discarded = partition_entries(data["entries"])
+
+            if discarded:
+                # Say what was lost and what was kept. "rebuilding" used to be
+                # the only thing this reported, which reads like routine
+                # maintenance rather than "every summary you have paid for has
+                # just been deleted".
+                for index, problem in discarded[:MAX_LOGGED_DISCARDS]:
+                    logger.warning("Discarding cache entry %d: %s", index, problem)
+                if len(discarded) > MAX_LOGGED_DISCARDS:
+                    logger.warning(
+                        "... and %d further unusable cache entries",
+                        len(discarded) - MAX_LOGGED_DISCARDS,
+                    )
+                logger.warning(
+                    "Discarded %d unusable cache entr%s, kept %d",
+                    len(discarded),
+                    "y" if len(discarded) == 1 else "ies",
+                    len(usable),
+                )
+                data["entries"] = usable
+                self._stats["discarded_entries"] += len(discarded)
+
             self._data = data
             self._reindex()
+
+            if discarded:
+                # The file on disk still holds the damaged entries. Mark the
+                # state dirty so the next write replaces it with the cleaned
+                # version, rather than re-reading and re-reporting the same
+                # damage on every future run.
+                self._dirty = True
+                self._pending_updates += 1
+
+            self._invalidate_if_stale()
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"Cache file corrupted or unreadable, rebuilding: {e}")
             self._rebuild()
@@ -328,6 +424,39 @@ class SummaryCache:
         if self.autosave and self._pending_updates >= self.autosave_every:
             self._save()
 
+    def _invalidate_if_stale(self) -> bool:
+        """
+        Drop the loaded entries if they were produced by other settings.
+
+        Called as soon as the file is loaded, so that the configuration hash
+        recorded in memory is always the current one. It used to be checked
+        only in :meth:`get`, which meant a ``put`` that happened before the
+        first ``get`` was appended alongside entries from another
+        configuration, under the *old* hash - and the first ``get`` afterwards
+        then invalidated the lot, including the entry just written. Reconciling
+        at load time is what makes ``put`` and ``get`` agree about which
+        configuration the file belongs to.
+
+        Caller must hold ``_lock``.
+        """
+        current_config_hash = self._compute_config_hash()
+
+        if self._data.get("config_hash") != current_config_hash:
+            logger.info("Configuration changed, invalidating cache")
+            self._clear_entries(current_config_hash)
+            return True
+
+        if self._data.get("schema_version") != self.schema_version:
+            logger.info(
+                "Cache schema version changed from %s to %s, invalidating cache",
+                self._data.get("schema_version"),
+                self.schema_version,
+            )
+            self._clear_entries(current_config_hash)
+            return True
+
+        return False
+
     def _find_entry(self, file_path: str) -> Optional[dict]:
         return self._index.get(file_path)
 
@@ -357,22 +486,10 @@ class SummaryCache:
         with self._lock:
             self._load()
 
-            # Invalidate if configuration changed
-            current_config_hash = self._compute_config_hash()
-            if self._data.get("config_hash") != current_config_hash:
-                logger.info("Configuration changed, invalidating cache")
-                self._clear_entries(current_config_hash)
-                self._stats["misses"] += 1
-                return None
-
-            # Invalidate if schema version changed
-            if self._data.get("schema_version") != self.schema_version:
-                logger.info(
-                    "Cache schema version changed from %s to %s, invalidating cache",
-                    self._data.get("schema_version"),
-                    self.schema_version,
-                )
-                self._clear_entries(current_config_hash)
+            # Normally a no-op: _load reconciles the configuration and schema
+            # as soon as the file is read. Kept so that a cache whose entries
+            # were replaced in memory is still checked before being trusted.
+            if self._invalidate_if_stale():
                 self._stats["misses"] += 1
                 return None
 
