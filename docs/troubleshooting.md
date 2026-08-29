@@ -56,8 +56,8 @@ repo2readme run --local ./my-project --exclude "tests/*" --max-file-size-kb 100
 
 Transient failures — rate limits, timeouts, dropped connections and malformed
 JSON responses — are retried automatically with exponential backoff. When the
-provider sends a `Retry-After` header or a "try again in 6.7s" hint, that value
-is used instead of the computed delay.
+provider sends a `Retry-After` header or a "try again in 2m59.56s" hint, that
+value is waited out in full, rather than being cut down to the backoff ceiling.
 
 The defaults are 2 retries (3 attempts) starting at a 1 second delay. Tune them
 with environment variables:
@@ -70,6 +70,20 @@ export REPO2README_RETRY_BASE_DELAY=2
 # fail fast, no retries at all
 export REPO2README_MAX_RETRIES=0
 ```
+
+### "Rate limit reached ... try again in 2m59.56s" ends the run
+
+A provider hint longer than `REPO2README_MAX_RETRY_AFTER` (5 minutes by
+default) stops the run instead of sleeping through it, because no attempt made
+before the window closes can succeed. If you would rather sit the limit out,
+raise the ceiling:
+
+```bash
+export REPO2README_MAX_RETRY_AFTER=3600
+```
+
+A daily quota reports an hour-scale wait, and that is usually a signal to
+switch provider or resume tomorrow rather than to keep the process parked.
 
 Lowering `--max-workers` also helps, since fewer parallel requests means fewer
 rate limits to retry in the first place:

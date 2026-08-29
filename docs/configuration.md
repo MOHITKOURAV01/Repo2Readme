@@ -316,6 +316,40 @@ Permanent failures — bad API key, unsupported provider, context length exceede
 |---|---|---|
 | `REPO2README_MAX_RETRIES` | `2` | Retries after the first attempt. `0` disables retrying. |
 | `REPO2README_RETRY_BASE_DELAY` | `1.0` | Seconds before the first retry; doubles each attempt, capped at 30s. |
+| `REPO2README_MAX_RETRY_AFTER` | `300.0` | Longest wait accepted from a provider's own hint. A longer hint ends the run instead. |
+
+### When the provider says how long to wait
 
 If the provider returns a `Retry-After` header, or puts a "try again in 6.7s"
 hint in the error message, that value is used instead of the computed delay.
+The header is preferred over the message, and it may carry either a number of
+seconds or an HTTP-date.
+
+A hint in a message is read as a run of value-and-unit pairs, so the compound
+durations providers actually send are understood as well as the simple ones:
+
+| Hint | Waits |
+|---|---|
+| `try again in 500ms` | 0.5s |
+| `try again in 6.7s` | 6.7s |
+| `try again in 2m59.56s` | 179.56s |
+| `try again in 5 minutes` | 300s |
+| `try again in 1h30m` | 5400s |
+
+The provider's answer is **not** capped at the 30s backoff ceiling — that limit
+bounds the delays repo2readme guesses at, and applying it to a hint would retry
+inside the window the provider had just closed. It is bounded by
+`REPO2README_MAX_RETRY_AFTER` instead.
+
+A hint longer than that limit ends the run then and there, rather than sleeping
+and retrying: the provider has said no request can succeed for longer than this
+run is willing to wait, so the remaining attempts would all fail by definition.
+Raise the limit to sit out a long rate limit window:
+
+```bash
+# wait out a limit that resets in up to an hour
+export REPO2README_MAX_RETRY_AFTER=3600
+
+# never wait on a provider hint; use the computed backoff only
+export REPO2README_MAX_RETRY_AFTER=0
+```
