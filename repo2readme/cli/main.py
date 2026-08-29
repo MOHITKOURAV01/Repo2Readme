@@ -4,7 +4,6 @@ load_dotenv()
 import click
 from rich import print as rprint
 from rich.console import Console
-from rich.markup import escape
 from rich.progress import Progress
 from rich.table import Table
 from repo2readme.config import reset_api_keys
@@ -12,6 +11,7 @@ import os
 from collections import Counter
 
 from repo2readme import __version__
+from repo2readme.utils.console import escaped, styled
 from repo2readme.utils.logging_config import logging_options
 from repo2readme.utils.output import (
     OutputPathError,
@@ -163,11 +163,11 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
         try:
             output_target = prepare_output_path(output, create_parents=create_dirs)
         except OutputPathError as e:
-            rprint(f"[red]{escape(str(e))}[/red]")
+            rprint(f"[red]{escaped(e)}[/red]")
             raise SystemExit(2) from e
 
         if output_target.created_parent:
-            rprint(f"[green]Created {output_target.path.parent}[/green]")
+            rprint(f"[green]Created {escaped(output_target.path.parent)}[/green]")
 
     # Initialize file summary cache
     cache_dir = os.path.join(os.getcwd(), ".repo2readme", "cache")
@@ -205,7 +205,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
                 files, root_path, loader_obj = loader.load()
                 skipped = []
         except Exception as e:
-            rprint(f"[red]Failed to load repository: {e}[/red]")
+            rprint(f"[red]Failed to load repository: {escaped(e)}[/red]")
             return
         progress.update(task, advance=1)
 
@@ -232,11 +232,11 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
 
     if dry_run:
         rprint("\n[bold]Repository Tree[/bold]\n")
-        rprint(tree)
+        rprint(escaped(tree))
         rprint("\n[bold]Files to be processed[/bold]\n")
         for doc in documents:
             rel_path = doc["metadata"].get("relative_path", "")
-            rprint(f"✓ [green]{rel_path}[/green]")
+            rprint(f"✓ {styled(rel_path, 'green')}")
         if skipped:
             skip_reasons = Counter()
             for _, reason in skipped:
@@ -244,13 +244,19 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
             rprint("\n[bold]Skipped Files Summary[/bold]\n")
             reason_order = ["excluded by pattern", "ignored by default rules", "exceeds maximum file size", "protected large file"]
             printed = set()
+            # A reason is padded before it is escaped: escaping adds
+            # backslashes, and padding afterwards would align the columns on a
+            # width the user never sees.
+            def _reason_line(reason: str) -> str:
+                return f"{escaped(f'{reason:30s}')}: {skip_reasons[reason]}"
+
             for reason in reason_order:
                 if reason in skip_reasons:
                     printed.add(reason)
-                    rprint(f"{reason:30s}: {skip_reasons[reason]}")
+                    rprint(_reason_line(reason))
             for reason in sorted(skip_reasons):
                 if reason not in printed:
-                    rprint(f"{reason:30s}: {skip_reasons[reason]}")
+                    rprint(_reason_line(reason))
         rprint("\n[bold]Repository Analysis[/bold]\n")
         rprint(f"Files selected     : {total_documents}")
         rprint(f"Estimated tokens   : ~{estimated_tokens:,}")
@@ -277,7 +283,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
         try:
             setup_api_keys(provider)
         except Exception as e:
-            rprint(f"[red]Failed to configure API keys: {e}[/red]")
+            rprint(f"[red]Failed to configure API keys: {escaped(e)}[/red]")
             return
 
         with Progress() as progress:
@@ -338,7 +344,7 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
         except ReadmeGenerationError as e:
             # Nothing is written: an empty README would replace the user's
             # existing file with zero bytes.
-            rprint(f"\n[red]{e}[/red]")
+            rprint(f"\n[red]{escaped(e)}[/red]")
             rprint(
                 "[yellow]Nothing was written. Re-run to try again, or use "
                 "-v to see the reviewer's diagnostics.[/yellow]"
@@ -367,14 +373,14 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
             except OSError as e:
                 # The README exists and was paid for; printing it is the only
                 # way the user keeps it. Silently discarding it is not.
-                rprint(f"\n[red]Could not write {destination}: {escape(str(e))}[/red]")
+                rprint(f"\n[red]Could not write {escaped(destination)}: {escaped(e)}[/red]")
                 rprint("[yellow]Printing the README instead.[/yellow]\n")
                 rprint(readme)
                 raise SystemExit(1) from e
 
-            rprint(f"[green]Saved to {destination}[/green]")
+            rprint(f"[green]Saved to {escaped(destination)}[/green]")
             if backup and replacing:
-                rprint(f"[green]Previous version kept at {backup_path_for(destination)}[/green]")
+                rprint(f"[green]Previous version kept at {escaped(backup_path_for(destination))}[/green]")
 
         if strict and failures:
             rprint(

@@ -82,6 +82,26 @@ Authentication failures, unsupported providers and context-length errors are
 never retried — retrying cannot fix them, and failing immediately tells you
 what is actually wrong.
 
+## A file is listed under the wrong name, or a name is missing part of itself
+
+Fixed. Console output used to be parsed as Rich markup, which reads square
+brackets as style tags, so a path containing brackets lost them:
+
+```
+✓ app/users/.tsx          <- was app/users/[id].tsx
+✓ pages/posts/.tsx        <- was pages/posts/[slug].tsx
+```
+
+This affected the `--dry-run` tree and file list, the summarization failure
+report, and any message quoting a path or a provider error. Dynamic-route files
+(`[slug].tsx`, `[id].vue`, `[...params].ts`) were the common case, and two
+different routes could end up displayed under the same name.
+
+Paths and provider messages are now escaped before they are printed, so they
+appear exactly as they are on disk. If you are on an older version and need to
+check which files a run selected, `-v` logs the same list through the logging
+handler, which never parsed markup.
+
 ## Generated README looks incomplete or low quality
 
 The tool iterates internally until the reviewer agent scores the draft 8.5+ or a max iteration count is hit. If quality is still off, check that your repo's key files (entry points, config, core logic) aren't being filtered out — run with `--dry-run` to confirm they're in the "Files to be processed" list.

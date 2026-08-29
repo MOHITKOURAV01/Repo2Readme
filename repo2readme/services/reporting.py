@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from collections.abc import Iterable, Sequence
 from typing import Any
 
+from repo2readme.utils.console import escaped
+
 # Provider errors can be several hundred characters of JSON. Keep the console
 # readable; the full text is still available in the returned failure objects.
 MAX_REASON_LENGTH = 140
@@ -126,6 +128,11 @@ def build_report_lines(
     """Build the console report as Rich-markup lines.
 
     Returns an empty list when nothing failed, so the happy path stays quiet.
+
+    The style tags in the returned lines are written here and are meant as
+    markup; every interpolated value is escaped, so a line is always safe to
+    hand to ``rich.print``. This is a report about a failure, and a report that
+    raises ``MarkupError`` while describing one is worse than no report at all.
     """
     if not failures:
         return []
@@ -140,9 +147,16 @@ def build_report_lines(
     ]
 
     for group in group_failures(failures):
-        lines.append(f"[yellow]{group.count} file(s):[/yellow] {group.reason}")
+        # The reason is a provider's error text and the paths come from the
+        # repository. Neither is markup, and both routinely contain brackets -
+        # a JSON fragment in an error, a dynamic route such as [slug].tsx in a
+        # path - which Rich would otherwise read as a style tag and swallow, or
+        # reject outright if it happens to look like a closing one.
+        lines.append(
+            f"[yellow]{group.count} file(s):[/yellow] {escaped(group.reason)}"
+        )
         for path in group.file_paths[:max_paths_per_group]:
-            lines.append(f"    - {path}")
+            lines.append(f"    - {escaped(path)}")
         remaining = group.count - max_paths_per_group
         if remaining > 0:
             lines.append(f"    ... and {remaining} more")

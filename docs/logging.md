@@ -49,6 +49,23 @@ on disk.
 If the path cannot be opened, the run prints a message and continues with
 console logging rather than aborting.
 
+## Markup in console output
+
+Progress and results are printed through Rich, whose markup syntax uses square
+brackets: `[green]...[/green]` renders in green. Style tags in those lines are
+written by repo2readme itself.
+
+Everything interpolated into them — a file path, an exception, a provider's
+error text — is escaped first, so a bracket in a filename is shown rather than
+parsed. That matters for dynamic-route files (`[slug].tsx`, `[id].vue`) and for
+provider errors carrying JSON, either of which would otherwise be silently
+truncated or, in the case of a stray closing tag, abort the line with a
+`MarkupError`.
+
+Diagnostics go through the logging handler, which is constructed with
+`markup=False` and has never parsed markup, so `-v` output is unaffected either
+way.
+
 ## Version
 
 ```bash
