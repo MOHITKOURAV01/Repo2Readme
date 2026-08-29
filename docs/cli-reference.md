@@ -26,7 +26,7 @@ repo2readme run [OPTIONS]
 | `--max-file-size-kb <N>` | | Skip files larger than N KB. |
 | `--provider <NAME>` | | LLM provider to use. See `repo2readme providers`. |
 | `--model <NAME>` | | Model name. Defaults to the selected provider's default model. |
-| `--base-url <URL>` | | Base URL override for OpenAI-compatible providers. |
+| `--base-url <URL>` | | Send requests to a different endpoint (proxy, gateway, self-hosted). Supported for every provider except `google`, which is refused rather than ignored. |
 
 You must provide exactly one of `--url` or `--local`.
 

@@ -4,7 +4,12 @@ import os
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from repo2readme.providers import get_provider
+from repo2readme.providers import (
+    BaseUrlNotSupportedError,
+    ProviderSpec,
+    get_provider,
+    providers_supporting_base_url,
+)
 
 
 def _missing_package(package: str, provider_label: str) -> ImportError:
@@ -12,6 +17,35 @@ def _missing_package(package: str, provider_label: str) -> ImportError:
         f"{provider_label} support requires the '{package}' package. "
         f"Install it with: pip install {package}"
     )
+
+
+def _base_url_kwargs(
+    spec: ProviderSpec, base_url: str | None, explicit: bool
+) -> dict[str, str]:
+    """The base URL argument for this provider's client, if it takes one.
+
+    Every branch below builds its client with ``**_base_url_kwargs(...)`` rather
+    than naming the keyword itself. Three of them used to omit it: ``base_url``
+    was resolved at the top of :func:`create_llm` and then never read again on
+    the Groq, Google and Anthropic paths, so a flag that is declared in the CLI,
+    documented, threaded through four call sites and keyed into the summary
+    cache had no effect on where the requests went.
+
+    ``explicit`` distinguishes a value the user asked for from the registry
+    default. A provider with no base URL option and no default has nothing to
+    refuse when the user did not ask for anything.
+    """
+    if spec.base_url_param is None:
+        if explicit:
+            raise BaseUrlNotSupportedError(
+                spec.name, providers_supporting_base_url()
+            )
+        return {}
+
+    if base_url is None:
+        return {}
+
+    return {spec.base_url_param: base_url}
 
 
 def create_llm(
@@ -35,26 +69,35 @@ def create_llm(
     base_url : str | None
         Optional base URL. Falls back to the provider's default base URL,
         which is what makes the OpenAI-compatible providers work out of the box.
+        Passed to the client under the keyword named by the provider's
+        ``base_url_param``.
 
     Raises
     ------
     UnknownProviderError
         If the provider is not in the registry. The message lists every
         supported provider.
+    BaseUrlNotSupportedError
+        If ``base_url`` is given for a provider whose client takes no base URL.
     """
 
     spec = get_provider(provider)
     name = spec.name
     model = model or spec.default_model
+    explicit_base_url = base_url is not None
     base_url = base_url or spec.default_base_url
     resolved_key = api_key or (os.getenv(spec.env_var) if spec.env_var else None)
+
+    # Resolved once, applied by every branch. Naming the keyword per branch is
+    # what let three of them forget it.
+    endpoint = _base_url_kwargs(spec, base_url, explicit_base_url)
 
     if name == "groq":
         try:
             from langchain_groq import ChatGroq
         except ImportError as exc:  # pragma: no cover - depends on install
             raise _missing_package("langchain-groq", spec.label) from exc
-        return ChatGroq(model=model, api_key=resolved_key, **kwargs)
+        return ChatGroq(model=model, api_key=resolved_key, **endpoint, **kwargs)
 
     if name == "google":
         try:
@@ -64,6 +107,7 @@ def create_llm(
         return ChatGoogleGenerativeAI(
             model=model,
             google_api_key=resolved_key,
+            **endpoint,
             **kwargs,
         )
 
@@ -72,7 +116,9 @@ def create_llm(
             from langchain_anthropic import ChatAnthropic
         except ImportError as exc:  # pragma: no cover - depends on install
             raise _missing_package("langchain-anthropic", spec.label) from exc
-        return ChatAnthropic(model=model, api_key=resolved_key, **kwargs)
+        return ChatAnthropic(
+            model=model, api_key=resolved_key, **endpoint, **kwargs
+        )
 
     if name == "ollama":
         # Ollama runs locally and needs no key, but langchain-ollama is not a
@@ -81,7 +127,7 @@ def create_llm(
             from langchain_ollama import ChatOllama
         except ImportError as exc:
             raise _missing_package("langchain-ollama", spec.label) from exc
-        return ChatOllama(model=model, base_url=base_url, **kwargs)
+        return ChatOllama(model=model, **endpoint, **kwargs)
 
     # openai, openrouter and together all speak the OpenAI wire protocol and
     # differ only by base URL and key.
@@ -93,7 +139,7 @@ def create_llm(
         return ChatOpenAI(
             model=model,
             api_key=resolved_key,
-            base_url=base_url,
+            **endpoint,
             **kwargs,
         )
 

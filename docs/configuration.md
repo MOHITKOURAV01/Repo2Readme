@@ -32,6 +32,32 @@ repo2readme run --local . --provider together
 repo2readme run --local . --provider anthropic --model claude-sonnet-4-5
 ```
 
+### Pointing a provider somewhere else
+
+`--base-url` sends the requests to a different endpoint — an egress proxy, a
+LiteLLM or Helicone gateway, a recording proxy, a region-pinned endpoint —
+rather than to the provider's own:
+
+```bash
+repo2readme run --local . --provider groq      --base-url https://gateway.internal/v1
+repo2readme run --local . --provider anthropic --base-url https://gateway.internal
+repo2readme run --local . --provider ollama    --base-url http://gpu-box:11434
+```
+
+It works for every provider except `google`. `ChatGoogleGenerativeAI` is not an
+OpenAI-protocol client and takes no base URL, so `--provider google --base-url`
+is refused rather than accepted and ignored:
+
+```
+$ repo2readme run --local . --provider gemini --base-url https://gateway.internal
+--base-url is not supported for provider 'google': its client has no base URL
+option, so the value would be ignored and the requests would go to the
+provider's own endpoint. Providers that accept a base URL: groq, openai,
+anthropic, openrouter, together, ollama.
+```
+
+The check runs before the repository is loaded, so it costs nothing.
+
 `ollama` talks to a local server (`http://localhost:11434` by default) and never
 prompts for a key. It needs the optional `langchain-ollama` package:
 

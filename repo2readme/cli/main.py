@@ -24,7 +24,13 @@ from repo2readme.cache import SummaryCache
 from repo2readme.loaders.repo_loader import RepoLoader
 from repo2readme.summarize.summary import get_prompt_template_hash
 from repo2readme.dependency_graph import build_dependency_graph
-from repo2readme.providers import PROVIDERS, provider_choices_help
+from repo2readme.providers import (
+    PROVIDERS,
+    BaseUrlNotSupportedError,
+    UnknownProviderError,
+    provider_choices_help,
+    resolve_base_url,
+)
 
 # Import new services
 from repo2readme.services.environment import setup_api_keys
@@ -168,6 +174,22 @@ def run(url, local, output, force, backup, create_dirs, include_patterns, exclud
 
         if output_target.created_parent:
             rprint(f"[green]Created {output_target.path.parent}[/green]")
+
+    # Reject a base URL the chosen provider's client cannot use, before the
+    # clone rather than at the first API call. It also keys the summary cache,
+    # so accepting it here would invalidate the cache for a value that then
+    # changes nothing about where the requests go.
+    #
+    # Only when --provider was given: with no provider the call sites still
+    # apply their own defaults, and guessing one here would report an error
+    # about a provider the user never chose. create_llm makes the same check
+    # against whatever provider it is actually handed.
+    if base_url is not None and provider:
+        try:
+            resolve_base_url(provider, base_url)
+        except (BaseUrlNotSupportedError, UnknownProviderError) as e:
+            rprint(f"[red]{escape(str(e))}[/red]")
+            raise SystemExit(2) from e
 
     # Initialize file summary cache
     cache_dir = os.path.join(os.getcwd(), ".repo2readme", "cache")

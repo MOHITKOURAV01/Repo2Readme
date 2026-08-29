@@ -23,6 +23,25 @@ class UnknownProviderError(ValueError):
         )
 
 
+class BaseUrlNotSupportedError(ValueError):
+    """Raised when ``--base-url`` is given for a client that has no such option.
+
+    Saying so is the point. Accepting the flag and quietly sending the requests
+    to the provider's own endpoint is worse than refusing it: someone who sets a
+    base URL is deciding where the contents of their repository are allowed to
+    travel, and a silent no-op sends them somewhere else.
+    """
+
+    def __init__(self, provider: str, supported: list[str]):
+        self.provider = provider
+        super().__init__(
+            f"--base-url is not supported for provider {provider!r}: its client "
+            "has no base URL option, so the value would be ignored and the "
+            "requests would go to the provider's own endpoint. "
+            f"Providers that accept a base URL: {', '.join(supported)}."
+        )
+
+
 @dataclass(frozen=True)
 class ProviderSpec:
     """Everything repo2readme needs to know about one provider.
@@ -42,6 +61,12 @@ class ProviderSpec:
         Alternative names accepted on the command line, e.g. ``"gemini"``.
     default_base_url:
         Base URL applied when the user does not pass ``--base-url``.
+    base_url_param:
+        The keyword this provider's chat client takes the base URL as, or
+        ``None`` when its client has no such parameter. Which keyword a client
+        wants is provider knowledge, and provider knowledge lives here - keeping
+        it in the factory instead is how ``base_url`` came to be resolved and
+        then dropped for three of the six providers.
     """
 
     name: str
@@ -50,10 +75,15 @@ class ProviderSpec:
     env_var: str | None = None
     aliases: tuple[str, ...] = field(default_factory=tuple)
     default_base_url: str | None = None
+    base_url_param: str | None = "base_url"
 
     @property
     def requires_api_key(self) -> bool:
         return self.env_var is not None
+
+    @property
+    def supports_base_url(self) -> bool:
+        return self.base_url_param is not None
 
 
 PROVIDERS: tuple[ProviderSpec, ...] = (
@@ -69,6 +99,11 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_model="gemini-2.5-flash",
         env_var="GOOGLE_API_KEY",
         aliases=("gemini",),
+        # ChatGoogleGenerativeAI is not an OpenAI-protocol client and takes no
+        # base URL; its endpoint is configured through the underlying transport
+        # instead. That makes --base-url a genuinely unsupported combination
+        # here rather than an oversight, and it is refused rather than ignored.
+        base_url_param=None,
     ),
     ProviderSpec(
         name="openai",
@@ -174,11 +209,36 @@ def resolve_model(provider: str, model: str | None) -> str:
     return get_provider(provider).default_model
 
 
+def providers_supporting_base_url() -> list[str]:
+    """Provider names whose client accepts a base URL."""
+    return [spec.name for spec in PROVIDERS if spec.supports_base_url]
+
+
+def supports_base_url(provider: str) -> bool:
+    """Whether ``--base-url`` means anything for this provider."""
+    return get_provider(provider).supports_base_url
+
+
 def resolve_base_url(provider: str, base_url: str | None) -> str | None:
-    """Return ``base_url`` when given, otherwise the provider default."""
+    """Return ``base_url`` when given, otherwise the provider default.
+
+    Raises
+    ------
+    BaseUrlNotSupportedError
+        If ``base_url`` is given for a provider whose client has no base URL
+        option. Returning it anyway would hand the caller a value that is
+        silently discarded further down.
+    """
+    spec = get_provider(provider)
+
     if base_url:
+        if not spec.supports_base_url:
+            raise BaseUrlNotSupportedError(
+                spec.name, providers_supporting_base_url()
+            )
         return base_url
-    return get_provider(provider).default_base_url
+
+    return spec.default_base_url
 
 
 def provider_choices_help() -> str:
